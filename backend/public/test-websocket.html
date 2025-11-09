@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>QuizBattle Test</title>
+    <style>
+        body { font-family: Arial; margin: 20px; }
+        .controls { margin: 10px 0; }
+        button { padding: 8px 15px; margin: 5px; }
+        input { padding: 8px; margin: 5px; }
+        #messages { 
+            border: 1px solid #ccc; 
+            height: 300px; 
+            overflow-y: scroll; 
+            padding: 10px;
+            margin: 10px 0;
+        }
+        .log { margin: 5px 0; padding: 3px; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <h1>QuizBattle Test</h1>
+    
+    <div class="controls">
+        <input type="text" id="playerName" placeholder="Your name" >
+        <button onclick="connect()">Connect</button>
+        <button onclick="joinRoom()">Join Room</button>
+        <button onclick="sendChat()">Send Chat</button>
+    </div>
+
+    <div id="messages"></div>
+
+    <script>
+        let ws = null;
+        let playerName = 'Player';
+
+        function log(msg, type = 'info') {
+            const div = document.getElementById('messages');
+            div.innerHTML += `<div class="log ${type}">${new Date().toLocaleTimeString()}: ${msg}</div>`;
+            div.scrollTop = div.scrollHeight;
+        }
+
+        function connect() {
+            if (ws?.readyState === WebSocket.OPEN) {
+                return log('Already connected', 'info');
+            }
+
+            playerName = document.getElementById('playerName').value || 'Player';
+            
+            ws = new WebSocket('ws://localhost:8080');
+            
+            ws.onopen = () => log('Connected to server', 'success');
+            ws.onclose = () => log('Disconnected', 'error');
+            ws.onerror = (e) => log('Connection error', 'error');
+            
+            ws.onmessage = (e) => {
+                const data = JSON.parse(e.data);
+                handleMessage(data);
+            };
+        }
+
+        function handleMessage(data) {
+            switch (data.type) {
+                case 'welcome':
+                    log(`Server: ${data.message} (ID: ${data.connection_id})`, 'success');
+                    break;
+                case 'room_joined':
+                    log(`Joined room: ${data.room_code} (Players: ${data.players_count})`, 'success');
+                    break;
+                case 'player_joined':
+                    log(`${data.player_name} joined (Total: ${data.players_count})`, 'info');
+                    break;
+                case 'chat':
+                    log(`${data.player_name}: ${data.message}`, 'info');
+                    break;
+                case 'error':
+                    log(`Error: ${data.message}`, 'error');
+                    break;
+                default:
+                    log(`Unknown: ${JSON.stringify(data)}`, 'info');
+            }
+        }
+
+        function joinRoom() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                return log('Please connect first', 'error');
+            }
+
+            playerName = document.getElementById('playerName').value || 'Player';
+            
+            ws.send(JSON.stringify({
+                type: 'join_room',
+                player_name: playerName
+            }));
+            
+            log(`Joining as: ${playerName}`, 'info');
+        }
+
+        function sendChat() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                return log('Please connect first', 'error');
+            }
+
+            ws.send(JSON.stringify({
+                type: 'chat_message',
+                player_name: playerName,
+                message: 'Hello from ' + playerName
+            }));
+            
+            log(`You: Hello from ${playerName}`, 'info');
+        }
+
+        // Auto connect
+        window.onload = connect;
+    </script>
+</body>
+</html>
