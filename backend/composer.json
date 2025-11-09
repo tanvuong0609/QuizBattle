@@ -1,0 +1,14 @@
+{
+    "name": "quizbattle/backend",
+    "description": "QuizBattle Backend with WebSocket",
+    "type": "project",
+    "require": {
+        "cboden/ratchet": "^0.4.4",
+        "ext-json": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/"
+        }
+    }
+}

@@ -1,0 +1,15 @@
+# Dependencies
+/vendor/
+/composer.phar
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+/logs/
+
+# Cache
+/cache/
+/tmp/
