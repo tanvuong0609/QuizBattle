@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Quick Play Test</title>
+</head>
+<body>
+  <h2>Quick Play Join</h2>
+  <input id="name" placeholder="Nhập tên..." />
+  <button onclick="join()">Join</button>
+  <pre id="log"></pre>
+
+<script>
+let ws;
+const log = msg => document.getElementById('log').textContent += msg + "\n";
+
+function join() {
+  const name = document.getElementById('name').value.trim();
+  if (!name) return alert('Nhập tên');
+
+  ws = new WebSocket("ws://127.0.0.1:8080");
+
+  ws.onopen = () => {
+    log("✅ Connected to server");
+    ws.send(JSON.stringify({action:'join', name}));
+  };
+
+  ws.onmessage = e => {
+    const data = JSON.parse(e.data);
+    log("📩 " + JSON.stringify(data));
+    if (data.type === 'start_game') alert("🎮 Game started!");
+  };
+
+  ws.onclose = () => log("❌ Disconnected");
+}
+</script>
+</body>
+</html>
