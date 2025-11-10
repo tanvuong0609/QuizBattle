@@ -1,4 +1,23 @@
+import { userState } from 'react'
+
 function LandingPage() {
+  const [username, setUsername] = userState('')
+  const [error, setError] = userState('')
+
+  const validateUsername = (value) => {
+    if (!value) return 'Username is required.'
+    if (value.length < 3) return 'Username must be at least 3 characters.'
+    if (value.length > 15) return 'Username must be at most 15 characters.'
+    if (!/^[a-zA-Z0-9_]+$/.test(value)) {
+    return 'Only letters, numbers, and underscores are allowed.'
+    }
+    return ''
+  }
+  const handleUsernameChange = (e) => {
+    const value = e.target.value
+    setUsername(value)
+    setError(validateUsername(value))
+  }
   return (
     <div
       className="min-h-screen flex items-center justify-center"
