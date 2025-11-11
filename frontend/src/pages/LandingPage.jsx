@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 function LandingPage() {
+  const navigate = useNavigate()
   const [username, setUsername] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -44,11 +46,8 @@ function LandingPage() {
     await new Promise(resolve => setTimeout(resolve, 2000))
     
     setLoading(false)
-    setShowSuccess(true)
-    
-    setTimeout(() => {
-      alert(`🎮 Welcome ${username}!\n\nWebSocket connection will be implemented by backend team.\n\nFor now, this is the beautiful UI for your project!`)
-    }, 500)
+     // Navigate to lobby
+    navigate('/lobby', { state: { username } })
   }
 
   const handleKeyPress = (e) => {
