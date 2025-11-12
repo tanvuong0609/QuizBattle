@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 function LandingPage() {
@@ -8,17 +8,24 @@ function LandingPage() {
   const [loading, setLoading] = useState(false)
   const [isVisible, setIsVisible] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
+  const ws = useRef(null)
+
 
   useEffect(() => {
     setTimeout(() => setIsVisible(true), 100)
+    return () => {
+      if (ws.current) {
+        ws.current.close()
+      }
+    } 
   }, [])
 
   const validateUsername = (value) => {
-    if (!value) return 'Username is required'
-    if (value.length < 3) return 'Username must be at least 3 characters'
-    if (value.length > 20) return 'Username cannot exceed 20 characters'
+    if (!value) return 'Tên người chơi không được để trống'
+    if (value.length < 3) return 'Tên người chơi phải có ít nhất 3 ký tự'
+    if (value.length > 20) return 'Tên người chơi không được vượt quá 20 ký tự'
     if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
-      return 'Only letters, numbers, _ and - allowed'
+      return 'Chỉ cho phép chữ cái, số, _ và - trong tên người chơi'
     }
     return ''
   }
@@ -41,15 +48,45 @@ function LandingPage() {
     }
 
     setLoading(true)
+    try {
+      ws.current = new WebSocket('ws://localhost:8080')  // Url đến WebSocket server
     
-    // Simulate WebSocket connection
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    
-    setLoading(false)
-     // Navigate to lobby
-    navigate('/lobby', { state: { username } })
-  }
+      ws.current.onopen = () => {
+        console.log('Đã kết nối đến WebSocket server')
+        setShowSuccess(true)
 
+        // Gửi thông tin user join
+        const joinMessage = {
+          type: 'join',
+          username: username,
+          action: 'quick_play'
+        }
+        ws.current.send(JSON.stringify(joinMessage))
+
+        setLoading(false)
+        
+        // Điều hướng đến lobby
+        navigate('/lobby', { 
+          state: { username, websocket: ws.current } 
+        })
+      }
+
+      ws.current.onerror = (error) => {
+        console.error('Lỗi WebSocket:', error)
+        setError('Lỗi kết nối đến server. Vui lòng thử lại sau.')
+        setLoading(false)
+      }
+
+      ws.current.onclose = () => {
+        console.log('Kết nối WebSocket đã bị ngắt')
+        setLoading(false)
+      }
+    } catch (error) {
+      console.error('Lỗi kết nối đến server:', error)
+      setError('Không thể kết nối đến server. Vui lòng thử lại sau.')
+      setLoading(false)
+    }
+  }
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !error && username && !loading) {
       handleQuickPlay()
