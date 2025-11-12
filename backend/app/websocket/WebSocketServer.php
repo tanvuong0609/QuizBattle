@@ -8,10 +8,15 @@ use App\Rooms\RoomManager;
 class WebSocketServer implements MessageComponentInterface {
     protected $clients;
     protected $roomManager;
+    protected $questionTimers = [];
+    // protected $loop;
+
 
     public function __construct() {
         $this->clients = new \SplObjectStorage;
         $this->roomManager = new RoomManager();
+        $this->questionTimers = [];
+        // $this->loop = $loop;
         echo "🚀 Server started on port 8080\n";
     }
 
@@ -40,6 +45,15 @@ class WebSocketServer implements MessageComponentInterface {
                 break;
             case 'chat_message':
                 $this->handleChatMessage($from, $data);
+                break;
+            case 'submit_answer':
+                $this->handleSubmitAnswer($from, $data);
+                break;
+            case 'start_game':
+                $this->handleStartGame($from, $data);
+                break;
+            case 'time_up': // Xử lý khi client báo time up
+                $this->handleTimeUp($from, $data);
                 break;
             default:
                 $this->sendError($from, 'Unknown message type');
@@ -78,6 +92,200 @@ class WebSocketServer implements MessageComponentInterface {
             'players_count' => $roomInfo['players_count']
         ], $conn);
     }
+
+    private function handleStartGame(ConnectionInterface $from, $data) {
+        $roomCode = $this->roomManager->getPlayerRoom($from);
+        if (!$roomCode) {
+            $this->sendError($from, 'You are not in a room');
+            return;
+        }
+        
+        $question = $this->roomManager->startGame($roomCode);
+        if ($question) {
+            $this->sendQuestionToRoom($roomCode, $question);
+        } else {
+            $this->sendError($from, 'Failed to start game - no questions available');
+        }
+    }
+
+    private function handleSubmitAnswer(ConnectionInterface $from, $data) {
+        $roomCode = $this->roomManager->getPlayerRoom($from);
+        $playerId = $from->resourceId;
+        $questionId = $data['question_id'] ?? null;
+        $answerIndex = $data['answer_index'] ?? null;
+        
+        if (!$roomCode || $questionId === null || $answerIndex === null) {
+            return $this->sendError($from, 'Invalid answer data');
+        }
+        
+        $isCorrect = $this->roomManager->submitAnswer($roomCode, $playerId, $questionId, $answerIndex);
+        
+        // Gửi kết quả cho player
+        $from->send(json_encode([
+            'type' => 'answer_result',
+            'question_id' => $questionId,
+            'correct' => $isCorrect,
+            'correct_answer' => $this->roomManager->getCurrentQuestion($roomCode)['correct_answer'] ?? null
+        ]));
+        
+        // Kiểm tra nếu tất cả players đã trả lời
+        if ($this->allPlayersAnswered($roomCode, $questionId)) {
+            $this->nextQuestionOrFinish($roomCode);
+        }
+    }
+
+    private function sendQuestionToRoom($roomCode, $question) {
+        $this->broadcastToRoom($roomCode, [
+            'type' => 'new_question',
+            'question' => $question,
+            'time_limit' => $question['time_limit'],
+            'server_time' => time() // Gửi thời gian server để client sync
+        ]);
+        
+        echo "❓ Sent question to room {$roomCode}: {$question['question']}\n";
+        
+        // Đặt timer cho câu hỏi
+        $this->setAutoNextTimer($roomCode, $question['time_limit']);
+    }
+
+    private function setAutoNextTimer($roomCode, $duration) {
+        // Hủy timer cũ nếu có
+        if (isset($this->questionTimers[$roomCode])) {
+            return;
+        }
+        
+        // Đánh dấu có timer đang chạy
+        $this->questionTimers[$roomCode] = true;
+        
+        // Chạy timer trong background (đơn giản)
+        $this->runSimpleTimer($roomCode, $duration);
+    }
+
+    private function runSimpleTimer($roomCode, $duration) {
+        // Thêm 2 giây buffer để đảm bảo client có thời gian xử lý
+        $waitTime = $duration + 2;
+        
+        // Sử dụng shell_exec để chạy background process
+        $script = __DIR__ . "/../timer_script.php";
+        $command = "php \"$script\" \"$roomCode\" \"$waitTime\"";
+        
+        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+            pclose(popen("start /B " . $command, "r"));
+        } else {
+            exec($command . " > /dev/null 2>&1 &");
+        }
+        
+        echo "⏰ Auto-next timer set for {$waitTime}s in room {$roomCode}\n";
+    }
+
+    private function handleTimeUp(ConnectionInterface $from, $data) {
+        $roomCode = $this->roomManager->getPlayerRoom($from);
+        if (!$roomCode) return;
+        
+        echo "⏰ Client reported time up in room {$roomCode}\n";
+        $this->nextQuestionOrFinish($roomCode);
+    }
+
+    // private function setQuestionTimer($roomCode, $duration) {
+    //     // Hủy timer cũ nếu có
+    //     $this->cancelQuestionTimer($roomCode);
+        
+    //     $remaining = $duration;
+
+    //     // Timer cập nhật mỗi giây
+    //     $intervalTimer = $this->loop->addPeriodicTimer(1, function() use (&$remaining, $roomCode) {
+    //         if ($remaining > 0) {
+    //             $this->broadcastToRoom($roomCode, [
+    //                 'type' => 'time_update',
+    //                 'remaining_time' => $remaining
+    //             ]);
+    //             echo "⏰ Room {$roomCode}: {$remaining}s remaining\n";
+    //             $remaining--;
+    //         }
+    //     });
+
+    //     // Timer kết thúc
+    //     $mainTimer = $this->loop->addTimer($duration, function() use ($roomCode, $intervalTimer) {
+    //         $this->loop->cancelTimer($intervalTimer);
+    //         $this->broadcastToRoom($roomCode, [
+    //             'type' => 'time_up',
+    //             'message' => 'Time is up!'
+    //         ]);
+    //         echo "⏰ Time's up in room {$roomCode}\n";
+    //         $this->nextQuestionOrFinish($roomCode);
+    //     });
+
+    //     $this->questionTimers[$roomCode] = [
+    //         'main_timer' => $mainTimer,
+    //         'interval_timer' => $intervalTimer
+    //     ];
+        
+    //     echo "⏰ Timer set for {$duration}s in room {$roomCode}\n";
+    // }
+
+    // private function cancelQuestionTimer($roomCode) {
+    //     if (isset($this->questionTimers[$roomCode])) {
+    //         if (isset($this->questionTimers[$roomCode]['main_timer'])) {
+    //             $this->loop->cancelTimer($this->questionTimers[$roomCode]['main_timer']);
+    //         }
+    //         if (isset($this->questionTimers[$roomCode]['interval_timer'])) {
+    //             $this->loop->cancelTimer($this->questionTimers[$roomCode]['interval_timer']);
+    //         }
+    //         unset($this->questionTimers[$roomCode]);
+    //         echo "⏰ Timer cancelled for room {$roomCode}\n";
+    //     }
+    // }
+
+    private function nextQuestionOrFinish($roomCode) {
+
+        unset($this->questionTimers[$roomCode]);
+
+        if ($this->roomManager->isGameFinished($roomCode)) {
+            // Kết thúc game
+            $scores = $this->roomManager->getScores($roomCode);
+            $this->broadcastToRoom($roomCode, [
+                'type' => 'game_finished',
+                'scores' => $scores,
+                'message' => 'Game finished!'
+            ]);
+            echo "🏁 Game finished in room {$roomCode}\n";
+        } else {
+            // Chuyển câu hỏi tiếp theo sau 2 giây
+               $nextQuestion = $this->roomManager->nextQuestion($roomCode);
+                if ($nextQuestion) {
+                    sleep(2); // Đợi 2 giây trước khi gửi câu hỏi tiếp theo
+                    $this->sendQuestionToRoom($roomCode, $nextQuestion);
+                }
+            
+        }
+    }
+
+    private function allPlayersAnswered($roomCode, $questionId) {
+        $players = $this->roomManager->getRoomPlayers($roomCode);
+        foreach ($players as $player) {
+            $answered = false;
+            foreach ($player['answers'] ?? [] as $answer) {
+                if ($answer['question_id'] == $questionId) {
+                    $answered = true;
+                    break;
+                }
+            }
+            if (!$answered) return false;
+        }
+        return true;
+    }
+
+    // private function getCorrectAnswer($roomCode, $questionId) {
+    //     $players = $this->roomManager->getRoomPlayers($roomCode);
+    //     foreach ($players as $player) {
+    //         foreach ($player['answers'] ?? [] as $answer) {
+    //             if ($answer['question_id'] == $questionId && $answer['correct']) {
+    //                 return $answer['answer'];
+    //             }
+    //         }
+    //     }
+    //     return null;
+    // }
 
     private function handleChatMessage(ConnectionInterface $from, $data) {
         $roomCode = $this->roomManager->getPlayerRoom($from);
