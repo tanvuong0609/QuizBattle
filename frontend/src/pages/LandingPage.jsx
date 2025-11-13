@@ -275,8 +275,8 @@ function LandingPage() {
           {/* Stats Section */}
           <div className="mt-6 grid grid-cols-3 gap-4">
             {[
-              { label: 'Players', value: '1000+', icon: '👥' },
-              { label: 'Questions', value: '5000+', icon: '❓' },
+              { label: 'Players', value: '500+', icon: '👥' },
+              { label: 'Questions', value: '300+', icon: '❓' },
               { label: 'Active Now', value: '127', icon: '🟢' },
             ].map((stat, i) => (
               <div
@@ -295,10 +295,10 @@ function LandingPage() {
             <div className="inline-block bg-white/90 backdrop-blur-lg rounded-2xl px-6 py-3 shadow-lg border border-white/30">
               <p className="text-gray-700 font-semibold text-sm flex items-center gap-2">
                 <span className="text-red-500 animate-pulse">❤️</span>
-                Made by Your Team
+                Nhóm 6
                 <span className="text-red-500 animate-pulse">❤️</span>
               </p>
-              <p className="text-gray-500 text-xs mt-1">Network Programming Project 2025</p>
+              <p className="text-gray-500 text-xs mt-1">Lập trình mạng</p>
             </div>
           </div>
         </div>
