@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import LandingPage from './pages/LandingPage'
 import LobbyPage from './pages/LobbyPage'
 import GamePage from './pages/GamePage'
+import './App.css'
 
 function App() {
   return (

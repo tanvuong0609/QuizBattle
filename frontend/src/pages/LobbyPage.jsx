@@ -17,8 +17,6 @@ function LobbyPage() {
   const reconnectAttempts = useRef(0)
   const maxReconnectAttempts = 5
 
-  navigate('/game', { state: { username, players } })
-
   // WebSocket Setup
   useEffect(() => {
     connectWebSocket()
@@ -437,4 +435,3 @@ function LobbyPage() {
 }
 
 export default LobbyPage
-
