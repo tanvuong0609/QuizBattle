@@ -1,6 +1,4 @@
 <?php
-// serve.php - WebSocket game server (Quick Play)
-// Replace your existing serve.php with this file.
 
 require_once __DIR__ . '/db.php'; // $pdo PDO connection
 
