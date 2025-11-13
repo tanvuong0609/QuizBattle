@@ -52,6 +52,15 @@ class WebSocketServer implements MessageComponentInterface {
             case 'start_game':
                 $this->handleStartGame($from, $data);
                 break;
+            case 'create_room':
+                $this->handleCreateRoom($from);
+                break;
+            case 'get_rooms':
+                $this->handleGetRooms($from);
+                break;
+            case 'get_stats':
+                $this->handleGetStats($from);
+                break;
             case 'time_up': // Xử lý khi client báo time up
                 $this->handleTimeUp($from, $data);
                 break;
@@ -62,7 +71,13 @@ class WebSocketServer implements MessageComponentInterface {
 
     public function onClose(ConnectionInterface $conn) {
         echo "🔌 Disconnected: {$conn->resourceId}\n";
-        $this->roomManager->removePlayer($conn);
+
+        $result = $this->roomManager->removePlayer($conn->resourceId);
+
+        if ($result['success']) {
+            echo "❌ Player removed {$conn->resourceId} from room\n";
+        }
+
         $this->clients->detach($conn);
     }
 
@@ -73,24 +88,55 @@ class WebSocketServer implements MessageComponentInterface {
 
     private function handleJoinRoom(ConnectionInterface $conn, $data) {
         $playerName = $data['player_name'] ?? 'Anonymous';
-        echo "🎮 {$playerName} joining room...\n";
+        echo "🎮 {$playerName}({$conn->resourceId}) joining room...\n";
         
-        $roomInfo = $this->roomManager->assignPlayerToRoom($conn, $playerName);
+        $result = $this->roomManager->addPlayer($conn->resourceId, $playerName);
         
-        // Gửi thông tin room cho player
-        $conn->send(json_encode([
-            'type' => 'room_joined',
-            'room_code' => $roomInfo['room_code'],
-            'player_name' => $playerName,
-            'players_count' => $roomInfo['players_count']
+        if ($result['success']) {
+
+             // Gửi thông tin room cho player
+            $conn->send(json_encode([
+                'type' => 'room_joined',
+                'room_code' => $result['room_code'],
+                'player' => $result['player'],
+                'message' => $result['message'],
+                'players_count' => $result['players_count']
+            ]));
+
+            // Thông báo cho players khác
+            $this->broadcastToRoom($result['room_code'], [
+                'type' => 'player_joined',
+                'player' => $result['player'],
+                'players_count' => $result['room']['players_count'] ?? count($result['room']['players']),
+                'message' => "{$playerName} has joined the room."
+            ], $conn);
+
+            echo "✅ {$playerName} joined room {$result['room']['id']}\n";
+
+        } else {
+            $this->sendError($conn, $result['message']);
+        }
+    }
+
+    private function handleCreateRoom(ConnectionInterface $from){
+        $result = $this->roomManager->createRoom();
+        $from->send(json_encode($result));
+    }
+
+    private function handleGetRooms(ConnectionInterface $from) {
+        $rooms = $this->roomManager->getAllRooms();
+        $from->send(json_encode([
+            'type' => 'rooms_list',
+            'rooms' => $rooms
         ]));
-        
-        // Thông báo cho players khác
-        $this->broadcastToRoom($roomInfo['room_code'], [
-            'type' => 'player_joined',
-            'player_name' => $playerName,
-            'players_count' => $roomInfo['players_count']
-        ], $conn);
+    }
+
+    private function handleGetStats(ConnectionInterface $from) {
+        $stats = $this->roomManager->getStatistics();
+        $from->send(json_encode([
+            'type' => 'stats',
+            'stats' => $stats
+        ]));
     }
 
     private function handleStartGame(ConnectionInterface $from, $data) {

@@ -67,7 +67,10 @@ function LandingPage() {
         
         // Điều hướng đến lobby
         navigate('/lobby', { 
-          state: { username, websocket: ws.current } 
+          state: { 
+            connectionId: ws.current.connectionId, // ✅ Chỉ lưu ID
+            username // ✅ Chỉ lưu tên người chơi
+          } 
         })
       }
 
