@@ -1,4 +1,6 @@
 <?php
+namespace App\Rooms;
+
 error_reporting(0);
 ini_set('display_errors', 0);
 
@@ -116,17 +118,18 @@ class RoomManager {
         return $room;
     }
     
-    public function addPlayer($playerName) {
+    public function addPlayer($resourceId, $playerName) {
         if (empty(trim($playerName))) {
             return ['success' => false, 'message' => 'Tên người chơi không được rỗng'];
         }
         
-        $playerId = 'player_' . $this->nextPlayerId++;
+        $playerId = 'player_' . $resourceId;
         
         $room = $this->autoCreateRoomIfNeeded();
         
         $player = [
             'id' => $playerId,
+            'resourceId' => $resourceId,
             'name' => trim($playerName),
             'joinedAt' => date('Y-m-d H:i:s'),
             'connected' => true
@@ -144,7 +147,10 @@ class RoomManager {
         ];
     }
     
-    public function assignPlayer($playerId, $playerName, $roomId = null) {
+    public function assignPlayer($resourceId, $playerName, $roomId = null) {
+        
+        $playerId = 'player_' . $resourceId;
+
         if (isset($this->playerRoomMap[$playerId])) {
             $currentRoomId = $this->playerRoomMap[$playerId];
             return [
@@ -172,6 +178,7 @@ class RoomManager {
         
         $player = [
             'id' => $playerId,
+            'resourceId' => $resourceId,
             'name' => $playerName,
             'joinedAt' => date('Y-m-d H:i:s'),
             'connected' => true
@@ -189,7 +196,9 @@ class RoomManager {
         ];
     }
     
-    public function removePlayer($playerId) {
+    public function removePlayer($resourceId) {
+        $playerId = 'player_' . $resourceId;
+
         if (!isset($this->playerRoomMap[$playerId])) {
             return ['success' => false, 'message' => 'Người chơi không ở trong phòng nào'];
         }
@@ -219,6 +228,17 @@ class RoomManager {
             'message' => 'Đã xóa người chơi khỏi phòng',
             'room' => $room->toArray()
         ];
+    }
+
+    public function getRoomByResourceId($resourceId) {
+        $playerId = 'player_' . $resourceId;
+
+        if (!isset($this->playerRoomMap[$playerId])) {
+            return null;
+        }
+        
+        $roomId = $this->playerRoomMap[$playerId];
+        return $this->getRoom($roomId);
     }
     
     public function getRoom($roomId) {
@@ -369,100 +389,4 @@ class RoomManager {
     }
 }
 
-// ============================================
-// API ENDPOINTS
-// ============================================
-
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
-
-$roomManager = new RoomManager();
-
-$method = $_SERVER['REQUEST_METHOD'];
-$action = $_GET['action'] ?? '';
-
-try {
-    switch ($action) {
-        case 'addPlayer':
-            if ($method === 'POST') {
-                $data = json_decode(file_get_contents('php://input'), true);
-                $result = $roomManager->addPlayer($data['name'] ?? '');
-                echo json_encode($result);
-            }
-            break;
-            
-        case 'removePlayer':
-            if ($method === 'POST') {
-                $data = json_decode(file_get_contents('php://input'), true);
-                $result = $roomManager->removePlayer($data['playerId'] ?? '');
-                echo json_encode($result);
-            }
-            break;
-            
-        case 'createRoom':
-            $result = $roomManager->createRoom();
-            echo json_encode($result);
-            break;
-            
-        case 'deleteRoom':
-            if ($method === 'POST') {
-                $data = json_decode(file_get_contents('php://input'), true);
-                $result = $roomManager->deleteRoom($data['roomId'] ?? '');
-                echo json_encode($result);
-            }
-            break;
-            
-        case 'startGame':
-            if ($method === 'POST') {
-                $data = json_decode(file_get_contents('php://input'), true);
-                $result = $roomManager->startGame($data['roomId'] ?? '');
-                echo json_encode($result);
-            }
-            break;
-            
-        case 'getRooms':
-            $rooms = $roomManager->getAllRooms();
-            echo json_encode(['success' => true, 'rooms' => $rooms]);
-            break;
-            
-        case 'getRoom':
-            $roomId = $_GET['roomId'] ?? '';
-            $room = $roomManager->getRoom($roomId);
-            echo json_encode(['success' => true, 'room' => $room]);
-            break;
-            
-        case 'getPlayers':
-            $players = $roomManager->getConnectedPlayers();
-            echo json_encode(['success' => true, 'players' => $players]);
-            break;
-            
-        case 'getStats':
-            $stats = $roomManager->getStatistics();
-            echo json_encode(['success' => true, 'stats' => $stats]);
-            break;
-            
-        case 'reset':
-            $result = $roomManager->reset();
-            echo json_encode($result);
-            break;
-            
-        default:
-            echo json_encode([
-                'success' => false,
-                'message' => 'Action không hợp lệ',
-                'availableActions' => [
-                    'addPlayer', 'removePlayer', 'createRoom', 'deleteRoom',
-                    'startGame', 'getRooms', 'getRoom', 'getPlayers', 
-                    'getStats', 'reset'
-                ]
-            ]);
-    }
-} catch (Exception $e) {
-    echo json_encode([
-        'success' => false,
-        'message' => 'Lỗi server: ' . $e->getMessage()
-    ]);
-}
 ?>

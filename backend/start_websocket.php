@@ -5,6 +5,7 @@ use Ratchet\Server\IoServer;
 use Ratchet\Http\HttpServer;
 use Ratchet\WebSocket\WsServer;
 use App\WebSocket\WebSocketServer;
+use App\Room\RoomManager;
 
 // Hiển thị thông tin startup
 echo "========================================\n";
