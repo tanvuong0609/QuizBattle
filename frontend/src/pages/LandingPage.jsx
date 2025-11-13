@@ -236,8 +236,8 @@ function LandingPage() {
           {/* Stats Section */}
           <div className="mt-6 grid grid-cols-3 gap-4">
             {[
-              { label: 'Players', value: '1000+', icon: '👥' },
-              { label: 'Questions', value: '5000+', icon: '❓' },
+              { label: 'Players', value: '500+', icon: '👥' },
+              { label: 'Questions', value: '300+', icon: '❓' },
               { label: 'Active Now', value: '127', icon: '🟢' },
             ].map((stat, i) => (
               <div
