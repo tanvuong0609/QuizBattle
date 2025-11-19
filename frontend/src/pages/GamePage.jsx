@@ -1,79 +1,132 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
+import { webSocketService } from '../services/WebSocketService'
+import { gameStateService } from '../services/GameStateService'
 
 function GamePage() {
   const navigate = useNavigate()
-  const location = useLocation()
-  const username = location.state?.username || 'Player'
-  const players = location.state?.players || []
+  const user = gameStateService.getUser()
+  const room = gameStateService.getRoom()
+  const storedQuestion = gameStateService.getCurrentQuestion()
   
-  // Game State
-  const [currentQuestion, setCurrentQuestion] = useState(null)
+  const [currentQuestion, setCurrentQuestion] = useState(storedQuestion)
   const [selectedAnswer, setSelectedAnswer] = useState(null)
-  const [timeRemaining, setTimeRemaining] = useState(20)
+  const [timeRemaining, setTimeRemaining] = useState(storedQuestion?.time_limit || 20)
   const [questionNumber, setQuestionNumber] = useState(1)
   const [totalQuestions] = useState(10)
-  const [gamePhase, setGamePhase] = useState('playing') // playing, waiting, result, finished
+  const [gamePhase, setGamePhase] = useState(storedQuestion ? 'playing' : 'waiting')
   const [correctAnswerId, setCorrectAnswerId] = useState(null)
   const [hasAnswered, setHasAnswered] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState('checking')
   
   // Scores
-  const [scores, setScores] = useState(
-    players.map(p => ({ username: p.username, score: 0, answeredCount: 0 }))
-  )
+  const [scores, setScores] = useState([])
   
-  // WebSocket
-  const wsRef = useRef(null)
   const timerRef = useRef(null)
 
-  // Demo question data
-  const demoQuestions = [
-    {
-      id: 'q1',
-      question: 'What is the capital of France?',
-      answers: [
-        { id: 'a', text: 'London' },
-        { id: 'b', text: 'Paris' },
-        { id: 'c', text: 'Berlin' },
-        { id: 'd', text: 'Madrid' }
-      ],
-      correctAnswerId: 'b',
-      timeLimit: 20
-    },
-    {
-      id: 'q2',
-      question: 'Which planet is known as the Red Planet?',
-      answers: [
-        { id: 'a', text: 'Venus' },
-        { id: 'b', text: 'Jupiter' },
-        { id: 'c', text: 'Mars' },
-        { id: 'd', text: 'Saturn' }
-      ],
-      correctAnswerId: 'c',
-      timeLimit: 20
-    },
-    {
-      id: 'q3',
-      question: 'What is 15 + 27?',
-      answers: [
-        { id: 'a', text: '40' },
-        { id: 'b', text: '42' },
-        { id: 'c', text: '44' },
-        { id: 'd', text: '46' }
-      ],
-      correctAnswerId: 'b',
-      timeLimit: 20
-    }
-  ]
-
-  // Initialize game
   useEffect(() => {
-    loadQuestion(0)
-    
+    // Kiểm tra user và room
+    if (!user || !room) {
+      console.warn('⚠️ No user or room data, redirecting to home')
+      navigate('/')
+      return
+    }
+
+    // Kiểm tra WebSocket connection
+    if (!webSocketService.isConnected()) {
+      console.log('🔌 WebSocket not connected in game, attempting to reconnect...')
+      setConnectionStatus('reconnecting')
+      
+      webSocketService.connect()
+        .then(() => {
+          console.log('✅ Reconnected in game')
+          setConnectionStatus('connected')
+          setupWebSocketHandlers()
+        })
+        .catch(error => {
+          console.error('❌ Failed to reconnect in game:', error)
+          setConnectionStatus('error')
+        })
+    } else {
+      setConnectionStatus('connected')
+      setupWebSocketHandlers()
+    }
+
     return () => {
+      webSocketService.offMessage('new_question')
+      webSocketService.offMessage('answer_result')
+      webSocketService.offMessage('game_finished')
+      webSocketService.offMessage('time_update')
+      webSocketService.offMessage('scores_update')
+      webSocketService.offMessage('connection_lost')
+      webSocketService.offMessage('connection_established')
+      
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [])
+  }, [navigate, user, room])
+
+  const setupWebSocketHandlers = () => {
+    webSocketService.onMessage('new_question', (data) => {
+      console.log('❓ New question received')
+      setCurrentQuestion(data.question)
+      setTimeRemaining(data.question.time_limit)
+      setQuestionNumber(prev => prev + 1)
+      setGamePhase('playing')
+      setSelectedAnswer(null)
+      setCorrectAnswerId(null)
+      setHasAnswered(false)
+      
+      gameStateService.setCurrentQuestion(data.question)
+      
+      // Update stored state
+      const currentState = webSocketService.getStoredState()
+      webSocketService.setStoredState({
+        ...currentState,
+        currentQuestion: data.question,
+        gameStatus: 'playing'
+      })
+    })
+
+    webSocketService.onMessage('answer_result', (data) => {
+      console.log('✅ Answer result received')
+      setCorrectAnswerId(data.correct_answer)
+      setGamePhase('result')
+    })
+
+    webSocketService.onMessage('game_finished', (data) => {
+      console.log('🏁 Game finished')
+      
+      // Clear game state nhưng giữ connection
+      gameStateService.clearState()
+      webSocketService.clearStoredState()
+      
+      navigate('/result', { state: { scores: data.scores } })
+    })
+
+    webSocketService.onMessage('time_update', (data) => {
+      setTimeRemaining(data.time_remaining)
+    })
+
+    webSocketService.onMessage('scores_update', (data) => {
+      console.log('📊 Scores updated')
+      setScores(data.scores)
+    })
+
+    webSocketService.onMessage('connection_lost', () => {
+      console.warn('⚠️ Connection lost in game')
+      setConnectionStatus('reconnecting')
+    })
+
+    webSocketService.onMessage('connection_established', () => {
+      console.log('✅ Connection re-established in game')
+      setConnectionStatus('connected')
+    })
+
+    // Nếu có stored question, tiếp tục game
+    if (storedQuestion && gamePhase === 'waiting') {
+      setGamePhase('playing')
+    }
+  }
 
   // Timer countdown
   useEffect(() => {
@@ -92,87 +145,28 @@ function GamePage() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [gamePhase, questionNumber])
-
-  const loadQuestion = (index) => {
-    if (index >= demoQuestions.length) {
-      // Game finished
-      setGamePhase('finished')
-      setTimeout(() => {
-        navigate('/result', { state: { scores, username } })
-      }, 2000)
-      return
-    }
-
-    const question = demoQuestions[index]
-    setCurrentQuestion(question)
-    setSelectedAnswer(null)
-    setCorrectAnswerId(null)
-    setTimeRemaining(question.timeLimit)
-    setQuestionNumber(index + 1)
-    setGamePhase('playing')
-    setHasAnswered(false)
-  }
+  }, [gamePhase])
 
   const handleAnswerSelect = (answerId) => {
-    if (gamePhase !== 'playing') return
+    if (gamePhase !== 'playing' || hasAnswered) return
     setSelectedAnswer(answerId)
   }
 
   const handleSubmitAnswer = () => {
-    if (!selectedAnswer || hasAnswered) return
+    if (!selectedAnswer || hasAnswered || !webSocketService.isConnected()) return
 
     setHasAnswered(true)
-    
-    // Calculate score based on time remaining
-    const timeBonus = Math.floor(timeRemaining * 5)
-    const baseScore = 100
-    const earnedScore = selectedAnswer === currentQuestion.correctAnswerId 
-      ? baseScore + timeBonus 
-      : 0
-
-    // Simulate sending to WebSocket
-    console.log('Submitting answer:', {
-      questionId: currentQuestion.id,
-      answerId: selectedAnswer,
-      timeSpent: currentQuestion.timeLimit - timeRemaining,
-      score: earnedScore
-    })
-
-    // Simulate waiting for all players
     setGamePhase('waiting')
     
-    setTimeout(() => {
-      showResults(earnedScore)
-    }, 2000)
-  }
-
-  const showResults = (earnedScore) => {
-    setGamePhase('result')
-    setCorrectAnswerId(currentQuestion.correctAnswerId)
+    console.log('📤 Submitting answer:', selectedAnswer)
     
-    // Update scores
-    setScores(prev => prev.map(player => {
-      if (player.username === username) {
-        return {
-          ...player,
-          score: player.score + earnedScore,
-          answeredCount: player.answeredCount + 1
-        }
-      }
-      // Simulate other players' scores (random)
-      const otherPlayerScore = Math.floor(Math.random() * 150) + 50
-      return {
-        ...player,
-        score: player.score + otherPlayerScore,
-        answeredCount: player.answeredCount + 1
-      }
-    }))
-
-    // Next question after 3 seconds
-    setTimeout(() => {
-      loadQuestion(questionNumber)
-    }, 3000)
+    // Gửi answer lên server
+    const answerMessage = {
+      type: 'submit_answer',
+      question_id: currentQuestion.id,
+      answer_id: selectedAnswer
+    }
+    webSocketService.send(answerMessage)
   }
 
   const handleTimeUp = () => {
@@ -181,15 +175,17 @@ function GamePage() {
     setGamePhase('waiting')
     setHasAnswered(true)
     
-    console.log('Time up! No answer submitted.')
+    console.log('⏰ Time up')
     
-    setTimeout(() => {
-      showResults(0) // No score for timeout
-    }, 1500)
+    // Báo server time up
+    const timeUpMessage = {
+      type: 'time_up'
+    }
+    webSocketService.send(timeUpMessage)
   }
 
   const getTimerColor = () => {
-    const percentage = (timeRemaining / currentQuestion?.timeLimit) * 100
+    const percentage = (timeRemaining / (currentQuestion?.time_limit || 20)) * 100
     if (percentage > 60) return '#10b981' // Green
     if (percentage > 30) return '#f59e0b' // Yellow
     return '#ef4444' // Red
@@ -217,6 +213,19 @@ function GamePage() {
 
   const sortedScores = [...scores].sort((a, b) => b.score - a.score)
 
+  // Hiển thị reconnecting overlay nếu đang reconnect
+  if (connectionStatus === 'reconnecting') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-600 to-pink-600">
+        <div className="text-center">
+          <div className="text-white text-6xl mb-4 animate-spin">🔄</div>
+          <div className="text-white text-2xl font-bold">Reconnecting...</div>
+          <div className="text-white/70 text-sm mt-2">Please wait while we restore your game</div>
+        </div>
+      </div>
+    )
+  }
+
   if (!currentQuestion) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-600 to-pink-600">
@@ -228,6 +237,15 @@ function GamePage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-600 to-pink-600 p-4">
       <div className="max-w-7xl mx-auto">
+        
+        {/* Connection Status Indicator */}
+        {connectionStatus !== 'connected' && (
+          <div className="fixed top-4 right-4 z-50">
+            <div className="px-4 py-2 bg-yellow-500 text-white rounded-full shadow-lg font-bold text-sm animate-pulse">
+              🟠 Reconnecting...
+            </div>
+          </div>
+        )}
         
         {/* Header */}
         <div className="bg-white/95 backdrop-blur-lg rounded-2xl p-4 mb-4 shadow-lg">
@@ -250,7 +268,9 @@ function GamePage() {
             
             <div className="flex items-center gap-4">
               <div className="text-sm text-gray-600">
-                Your Score: <span className="text-2xl font-black text-purple-600">{scores.find(s => s.username === username)?.score || 0}</span>
+                Your Score: <span className="text-2xl font-black text-purple-600">
+                  {scores.find(s => s.player_id === user.id)?.score || 0}
+                </span>
               </div>
             </div>
           </div>
@@ -284,7 +304,7 @@ function GamePage() {
                       strokeWidth="8"
                       fill="none"
                       strokeDasharray={`${2 * Math.PI * 56}`}
-                      strokeDashoffset={`${2 * Math.PI * 56 * (1 - timeRemaining / currentQuestion.timeLimit)}`}
+                      strokeDashoffset={`${2 * Math.PI * 56 * (1 - timeRemaining / (currentQuestion.time_limit || 20))}`}
                       strokeLinecap="round"
                       className="transition-all duration-1000"
                     />
@@ -304,7 +324,7 @@ function GamePage() {
                 </h2>
                 {gamePhase === 'result' && selectedAnswer === correctAnswerId && (
                   <div className="text-green-600 font-bold text-xl animate-bounce">
-                    🎉 Correct! +{scores.find(s => s.username === username)?.score - (scores.find(s => s.username === username)?.score - (100 + timeRemaining * 5)) || 0} points
+                    🎉 Correct! +100 points
                   </div>
                 )}
                 {gamePhase === 'result' && selectedAnswer !== correctAnswerId && selectedAnswer && (
@@ -320,12 +340,12 @@ function GamePage() {
                   <button
                     key={answer.id}
                     onClick={() => handleAnswerSelect(answer.id)}
-                    disabled={gamePhase !== 'playing'}
+                    disabled={gamePhase !== 'playing' || hasAnswered}
                     className={getAnswerClass(answer.id)}
                   >
                     <div className="flex items-center gap-3">
                       <span className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center font-black flex-shrink-0">
-                        {['A', 'B', 'C', 'D'][index]}
+                        {String.fromCharCode(65 + index)}
                       </span>
                       <span className="text-left flex-1">{answer.text}</span>
                       {gamePhase === 'result' && answer.id === correctAnswerId && (
@@ -340,7 +360,7 @@ function GamePage() {
               {gamePhase === 'playing' && (
                 <button
                   onClick={handleSubmitAnswer}
-                  disabled={!selectedAnswer || hasAnswered}
+                  disabled={!selectedAnswer || hasAnswered || connectionStatus !== 'connected'}
                   className="w-full py-4 px-6 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-black text-xl rounded-xl hover:shadow-2xl transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
                 >
                   {hasAnswered ? '✓ Submitted' : '✨ Submit Answer'}
@@ -359,9 +379,9 @@ function GamePage() {
               <div className="space-y-3">
                 {sortedScores.map((player, index) => (
                   <div
-                    key={player.username}
+                    key={player.player_id}
                     className={`p-3 rounded-xl transition-all duration-300 ${
-                      player.username === username
+                      player.player_id === user.id
                         ? 'bg-gradient-to-r from-purple-100 to-pink-100 border-2 border-purple-400'
                         : 'bg-gray-50'
                     }`}
@@ -380,13 +400,13 @@ function GamePage() {
                       {/* Info */}
                       <div className="flex-1 min-w-0">
                         <div className="font-bold text-gray-800 truncate text-sm">
-                          {player.username}
-                          {player.username === username && (
+                          {player.player_name}
+                          {player.player_id === user.id && (
                             <span className="ml-1 text-xs text-purple-600">(You)</span>
                           )}
                         </div>
                         <div className="text-xs text-gray-500">
-                          {player.answeredCount}/{totalQuestions} answered
+                          Correct: {player.correct_answers || 0}
                         </div>
                       </div>
                       
