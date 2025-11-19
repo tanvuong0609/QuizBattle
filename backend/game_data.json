@@ -1,0 +1,49 @@
+{
+    "rooms": {
+        "room_1": {
+            "id": "room_1",
+            "players": [
+                {
+                    "id": "player_94",
+                    "resourceId": 94,
+                    "name": "user1",
+                    "joinedAt": "2025-11-19 03:35:46",
+                    "connected": true
+                },
+                {
+                    "id": "player_98",
+                    "resourceId": 98,
+                    "name": "user2",
+                    "joinedAt": "2025-11-19 03:36:03",
+                    "connected": true
+                },
+                {
+                    "id": "player_102",
+                    "resourceId": 102,
+                    "name": "user3",
+                    "joinedAt": "2025-11-19 03:36:11",
+                    "connected": false,
+                    "lastSeen": "2025-11-19 03:37:38"
+                },
+                {
+                    "id": "player_106",
+                    "resourceId": 106,
+                    "name": "user4",
+                    "joinedAt": "2025-11-19 03:37:04",
+                    "connected": true
+                }
+            ],
+            "status": "playing",
+            "maxPlayers": 4,
+            "createdAt": "2025-11-19 03:35:46"
+        }
+    },
+    "playerRoomMap": {
+        "player_94": "room_1",
+        "player_98": "room_1",
+        "player_102": "room_1",
+        "player_106": "room_1"
+    },
+    "nextRoomId": 2,
+    "nextPlayerId": 1
+}

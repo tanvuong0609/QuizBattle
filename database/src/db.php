@@ -1,7 +1,7 @@
 <?php
-$host = '127.0.0.1:3366';
+$host = '127.0.0.1:3307';
 $user = 'root';
-$pass = '123456';
+$pass = '';
 $dbname = 'play';
 
 try {
