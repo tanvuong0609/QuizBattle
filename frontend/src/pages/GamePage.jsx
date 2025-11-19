@@ -172,7 +172,6 @@ function GamePage() {
   const handleTimeUp = () => {
     if (hasAnswered) return
     
-    console.log('⏰ Time up!')
     setGamePhase('waiting')
     setHasAnswered(true)
     
@@ -184,8 +183,6 @@ function GamePage() {
     }
     webSocketService.send(timeUpMessage)
   }
-
-  // ==================== UI Helpers ====================
 
   const getTimerColor = () => {
     const percentage = (timeRemaining / (currentQuestion?.time_limit || 20)) * 100
@@ -211,25 +208,7 @@ function GamePage() {
       return baseClass + "bg-purple-500 text-white border-purple-600 scale-105 shadow-lg"
     }
     
-    return baseClass + "bg-white text-gray-800 border-gray-300 hover:border-purple-400 hover:bg-purple-50 hover:scale-105 active:scale-95 cursor-pointer"
-  }
-
-  const getSyncStatusColor = () => {
-    switch (syncStatus) {
-      case 'synced': return 'text-green-500'
-      case 'syncing': return 'text-yellow-500'
-      case 'error': return 'text-red-500'
-      default: return 'text-gray-500'
-    }
-  }
-
-  const getSyncStatusText = () => {
-    switch (syncStatus) {
-      case 'synced': return '✓ Synced'
-      case 'syncing': return '⟳ Syncing...'
-      case 'error': return '✗ Out of sync'
-      default: return '?'
-    }
+    return baseClass + "bg-white text-gray-800 border-gray-300 hover:border-purple-400 hover:bg-purple-50 hover:scale-105 active:scale-95"
   }
 
   const sortedScores = [...scores].sort((a, b) => b.score - a.score)
@@ -250,11 +229,7 @@ function GamePage() {
   if (!currentQuestion) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-600 to-pink-600">
-        <div className="text-center">
-          <div className="text-6xl mb-4 animate-bounce">🎉</div>
-          <div className="text-white text-3xl font-bold">Game Finished!</div>
-          <div className="text-white/80 text-lg mt-2">Calculating results...</div>
-        </div>
+        <div className="text-white text-2xl font-bold">Loading question...</div>
       </div>
     )
   }
@@ -279,12 +254,6 @@ function GamePage() {
               <div className="text-2xl font-black text-purple-600">
                 Question {questionNumber}/{totalQuestions}
               </div>
-              
-              {/* Connection Status */}
-              <div className={`text-xs font-bold ${getSyncStatusColor()}`}>
-                {getSyncStatusText()}
-              </div>
-              
               {gamePhase === 'waiting' && (
                 <div className="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-sm font-bold animate-pulse">
                   ⏳ Waiting for players...
@@ -305,13 +274,6 @@ function GamePage() {
               </div>
             </div>
           </div>
-          
-          {/* Error Banner */}
-          {wsError && (
-            <div className="mt-2 bg-red-50 border border-red-200 rounded-lg p-2 text-red-600 text-sm">
-              ⚠️ {wsError}
-            </div>
-          )}
         </div>
 
         {/* Main Grid */}
@@ -324,6 +286,7 @@ function GamePage() {
             <div className="bg-white/95 backdrop-blur-lg rounded-2xl p-8 shadow-lg">
               <div className="flex items-center justify-center mb-6">
                 <div className="relative w-32 h-32">
+                  {/* Circle SVG */}
                   <svg className="transform -rotate-90 w-32 h-32">
                     <circle
                       cx="64"
@@ -359,19 +322,14 @@ function GamePage() {
                 <h2 className="text-3xl font-black text-gray-800 mb-2">
                   {currentQuestion.question}
                 </h2>
-                {gamePhase === 'result' && earnedPoints > 0 && (
+                {gamePhase === 'result' && selectedAnswer === correctAnswerId && (
                   <div className="text-green-600 font-bold text-xl animate-bounce">
                     🎉 Correct! +100 points
                   </div>
                 )}
-                {gamePhase === 'result' && selectedAnswer && selectedAnswer !== correctAnswerId && (
+                {gamePhase === 'result' && selectedAnswer !== correctAnswerId && selectedAnswer && (
                   <div className="text-red-600 font-bold text-xl">
                     ❌ Wrong answer
-                  </div>
-                )}
-                {gamePhase === 'result' && !selectedAnswer && (
-                  <div className="text-gray-600 font-bold text-xl">
-                    ⏰ Time out
                   </div>
                 )}
               </div>
@@ -382,7 +340,6 @@ function GamePage() {
                   <button
                     key={answer.id}
                     onClick={() => handleAnswerSelect(answer.id)}
-                    disabled={gamePhase !== 'playing' || hasAnswered}
                     disabled={gamePhase !== 'playing' || hasAnswered}
                     className={getAnswerClass(answer.id)}
                   >
@@ -430,6 +387,7 @@ function GamePage() {
                     }`}
                   >
                     <div className="flex items-center gap-3">
+                      {/* Rank */}
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-sm flex-shrink-0 ${
                         index === 0 ? 'bg-yellow-400 text-yellow-900' :
                         index === 1 ? 'bg-gray-300 text-gray-700' :
@@ -439,6 +397,7 @@ function GamePage() {
                         {index + 1}
                       </div>
                       
+                      {/* Info */}
                       <div className="flex-1 min-w-0">
                         <div className="font-bold text-gray-800 truncate text-sm">
                           {player.player_name}
@@ -451,6 +410,7 @@ function GamePage() {
                         </div>
                       </div>
                       
+                      {/* Score */}
                       <div className="text-right">
                         <div className="text-lg font-black text-purple-600">
                           {player.score}
