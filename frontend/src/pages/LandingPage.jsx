@@ -1,23 +1,34 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { webSocketService } from '../services/WebSocketService'
+import { gameStateService } from '../services/GameStateService'
 
 function LandingPage() {
   const navigate = useNavigate()
-  const [username, setUsername] = useState('')
+  const [username, setUsername] = useState(gameStateService.getUser()?.username || '')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [isVisible, setIsVisible] = useState(false)
-  const [showSuccess, setShowSuccess] = useState(false)
-  const ws = useRef(null)
-
+  const [connectionStatus, setConnectionStatus] = useState('disconnected')
 
   useEffect(() => {
     setTimeout(() => setIsVisible(true), 100)
+    
+    // Kiểm tra recovery
+    if (gameStateService.shouldRecover()) {
+      console.log('🔄 Recovery data available')
+      // Tự động kết nối lại
+      handleRecoverGame()
+    }
+
+    // Cleanup khi unmount
     return () => {
-      if (ws.current) {
-        ws.current.close()
-      }
-    } 
+      // Không disconnect ở đây để giữ kết nối
+      webSocketService.offMessage('room_joined')
+      webSocketService.offMessage('error')
+      webSocketService.offMessage('connection_established')
+      webSocketService.offMessage('connection_lost')
+    }
   }, [])
 
   const validateUsername = (value) => {
@@ -48,53 +59,173 @@ function LandingPage() {
     }
 
     setLoading(true)
-    try {
-      ws.current = new WebSocket('ws://localhost:8080')  // Url đến WebSocket server
+    setError('')
     
-      ws.current.onopen = () => {
-        console.log('Đã kết nối đến WebSocket server')
-        setShowSuccess(true)
-
-        // Gửi thông tin user join
-        const joinMessage = {
-          type: 'join',
-          username: username,
-          action: 'quick_play'
-        }
-        ws.current.send(JSON.stringify(joinMessage))
-
-        setLoading(false)
-        
-        // Điều hướng đến lobby
-        navigate('/lobby', { 
-          state: { 
-            connectionId: ws.current.connectionId, // ✅ Chỉ lưu ID
-            username // ✅ Chỉ lưu tên người chơi
-          } 
-        })
+    try {
+      // Bước 1: Lưu thông tin user trước
+      gameStateService.setUser({ username, joinedAt: Date.now() })
+      
+      // Bước 2: Kết nối WebSocket
+      console.log('🔌 Establishing WebSocket connection...')
+      setConnectionStatus('connecting')
+      
+      await webSocketService.connect()
+      
+      console.log('✅ WebSocket connected, joining room...')
+      setConnectionStatus('connected')
+      
+      // Bước 3: Đăng ký handlers
+      setupMessageHandlers()
+      
+      // Bước 4: Gửi join message
+      const joinMessage = {
+        type: 'join_room',
+        player_name: username,
+        is_recovery: false
       }
-
-      ws.current.onerror = (error) => {
-        console.error('Lỗi WebSocket:', error)
-        setError('Lỗi kết nối đến server. Vui lòng thử lại sau.')
-        setLoading(false)
-      }
-
-      ws.current.onclose = () => {
-        console.log('Kết nối WebSocket đã bị ngắt')
-        setLoading(false)
-      }
+      
+      webSocketService.send(joinMessage)
+      
     } catch (error) {
-      console.error('Lỗi kết nối đến server:', error)
-      setError('Không thể kết nối đến server. Vui lòng thử lại sau.')
+      console.error('❌ Connection failed:', error)
+      setError('Không thể kết nối đến server. Vui lòng thử lại!')
+      setConnectionStatus('error')
       setLoading(false)
     }
   }
+
+  const setupMessageHandlers = () => {
+    // Handler khi join room thành công
+    webSocketService.onMessage('room_joined', (data) => {
+      console.log('✅ Room joined:', data.room_code)
+      
+      // Lưu thông tin room và player
+      gameStateService.setRoom(data.room)
+      gameStateService.setUser(data.player)
+      
+      // Lưu vào WebSocket state để recovery
+      webSocketService.setStoredState({
+        room: data.room,
+        player: data.player
+      })
+      
+      // Chuyển sang lobby
+      setLoading(false)
+      navigate('/lobby')
+    })
+    
+    // Handler khi có lỗi
+    webSocketService.onMessage('error', (data) => {
+      console.error('❌ Server error:', data.message)
+      setError(data.message || 'Có lỗi xảy ra')
+      setConnectionStatus('error')
+      setLoading(false)
+    })
+
+    // Handler khi mất kết nối
+    webSocketService.onMessage('connection_lost', () => {
+      setConnectionStatus('reconnecting')
+    })
+
+    // Handler khi kết nối lại
+    webSocketService.onMessage('connection_established', () => {
+      setConnectionStatus('connected')
+    })
+  }
+
+  const handleRecoverGame = async () => {
+    if (!gameStateService.shouldRecover()) return
+    
+    const recoveryData = gameStateService.getRecoveryData()
+    setUsername(recoveryData.user?.username || '')
+    setLoading(true)
+    
+    try {
+      console.log('🔄 Recovering game session...')
+      setConnectionStatus('connecting')
+      
+      await webSocketService.connect()
+      
+      console.log('✅ WebSocket connected, restoring session...')
+      setConnectionStatus('connected')
+      
+      // Setup handlers cho recovery
+      setupRecoveryHandlers()
+      
+      // WebSocket service sẽ tự động gửi rejoin message
+      
+    } catch (error) {
+      console.error('❌ Recovery failed:', error)
+      setError('Khôi phục game thất bại. Vui lòng bắt đầu game mới.')
+      gameStateService.clearState()
+      webSocketService.clearStoredState()
+      setConnectionStatus('error')
+      setLoading(false)
+    }
+  }
+
+  const setupRecoveryHandlers = () => {
+    webSocketService.onMessage('room_joined', (data) => {
+      console.log('✅ Room rejoined:', data.room_code)
+      
+      gameStateService.setRoom(data.room)
+      
+      setLoading(false)
+      
+      // Kiểm tra trạng thái game
+      if (data.room.status === 'playing') {
+        navigate('/game')
+      } else {
+        navigate('/lobby')
+      }
+    })
+    
+    webSocketService.onMessage('game_state', (data) => {
+      console.log('🎮 Game state received')
+      gameStateService.setGame(data.game)
+      
+      if (data.game.status === 'playing') {
+        navigate('/game')
+      } else {
+        navigate('/lobby')
+      }
+      
+      setLoading(false)
+    })
+    
+    webSocketService.onMessage('error', (data) => {
+      console.error('❌ Recovery error:', data.message)
+      // Nếu recovery thất bại, xóa state và bắt đầu mới
+      gameStateService.clearState()
+      webSocketService.clearStoredState()
+      setError(data.message || 'Không thể khôi phục game. Vui lòng bắt đầu mới.')
+      setConnectionStatus('error')
+      setLoading(false)
+    })
+  }
+
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !error && username && !loading) {
       handleQuickPlay()
     }
   }
+
+  const getConnectionStatusDisplay = () => {
+    switch (connectionStatus) {
+      case 'connecting':
+        return { text: '🟡 Đang kết nối...', color: 'text-yellow-500' }
+      case 'connected':
+        return { text: '🟢 Đã kết nối', color: 'text-green-500' }
+      case 'reconnecting':
+        return { text: '🟠 Đang kết nối lại...', color: 'text-orange-500' }
+      case 'error':
+        return { text: '🔴 Lỗi kết nối', color: 'text-red-500' }
+      default:
+        return { text: '⚪ Chưa kết nối', color: 'text-gray-500' }
+    }
+  }
+
+  const statusDisplay = getConnectionStatusDisplay()
 
   return (
     <div className="min-h-screen relative overflow-hidden" style={{
@@ -122,6 +253,30 @@ function LandingPage() {
           />
         ))}
       </div>
+
+      {/* Recovery Banner */}
+      {gameStateService.shouldRecover() && !loading && (
+        <div className="relative z-20">
+          <div className="bg-yellow-500 text-white text-center py-3 px-4 mb-4 mx-4 rounded-xl shadow-lg">
+            <p className="font-bold">🔄 Game đang chờ bạn!</p>
+            <button
+              onClick={handleRecoverGame}
+              className="mt-2 px-4 py-2 bg-white text-yellow-600 rounded-lg font-bold hover:bg-gray-100 transition-colors"
+            >
+              Tiếp tục chơi
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Connection Status Indicator */}
+      {connectionStatus !== 'disconnected' && (
+        <div className="fixed top-4 right-4 z-50">
+          <div className={`px-4 py-2 bg-white/90 backdrop-blur-lg rounded-full shadow-lg ${statusDisplay.color} font-bold text-sm`}>
+            {statusDisplay.text}
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
@@ -304,25 +459,6 @@ function LandingPage() {
         </div>
       </div>
 
-      {/* Success Modal Overlay */}
-      {showSuccess && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl transform animate-scale-in">
-            <div className="text-center">
-              <div className="text-6xl mb-4 animate-bounce">🎉</div>
-              <h2 className="text-3xl font-black text-gray-800 mb-2">Ready to Battle!</h2>
-              <p className="text-gray-600 mb-6">Get ready for an epic quiz showdown!</p>
-              <button
-                onClick={() => setShowSuccess(false)}
-                className="px-8 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold rounded-xl hover:shadow-lg transition-all duration-300 hover:scale-105"
-              >
-                Let's Go! 🚀
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Custom Animations */}
       <style>{`
         @keyframes blob {
@@ -337,16 +473,6 @@ function LandingPage() {
           50% { transform: translateY(-20px); }
         }
         
-        @keyframes fade-in {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        
-        @keyframes scale-in {
-          from { transform: scale(0.8); opacity: 0; }
-          to { transform: scale(1); opacity: 1; }
-        }
-        
         .animate-blob {
           animation: blob 7s infinite;
         }
@@ -357,14 +483,6 @@ function LandingPage() {
         
         .animation-delay-4000 {
           animation-delay: 4s;
-        }
-        
-        .animate-fade-in {
-          animation: fade-in 0.3s ease-out;
-        }
-        
-        .animate-scale-in {
-          animation: scale-in 0.3s ease-out;
         }
       `}</style>
     </div>

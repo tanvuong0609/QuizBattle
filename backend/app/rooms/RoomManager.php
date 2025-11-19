@@ -118,6 +118,85 @@ class RoomManager {
         return $room;
     }
     
+    public function markPlayerDisconnected($resourceId) {
+        $playerId = 'player_' . $resourceId;
+        
+        if (!isset($this->playerRoomMap[$playerId])) {
+            return ['success' => false, 'message' => 'Player not in any room'];
+        }
+        
+        $roomId = $this->playerRoomMap[$playerId];
+        
+        if (!isset($this->rooms[$roomId])) {
+            unset($this->playerRoomMap[$playerId]);
+            return ['success' => false, 'message' => 'Room not found'];
+        }
+        
+        $room = $this->rooms[$roomId];
+        
+        // Đánh dấu player là disconnected
+        foreach ($room->players as &$player) {
+            if ($player['id'] === $playerId) {
+                $player['connected'] = false;
+                $player['lastSeen'] = date('Y-m-d H:i:s');
+                break;
+            }
+        }
+        
+        $this->saveToFile();
+        
+        return [
+            'success' => true,
+            'message' => 'Player marked as disconnected',
+            'room' => $room->toArray()
+        ];
+    }
+
+    public function updatePlayerConnection($playerId, $newResourceId) {
+        echo "🔄 Updating connection for player {$playerId} to resource {$newResourceId}\n";
+        
+        // Tìm player trong tất cả các rooms
+        foreach ($this->rooms as $room) {
+            foreach ($room->players as &$player) {
+                if ($player['id'] === $playerId) {
+                    // Cập nhật resourceId và đánh dấu connected
+                    $oldResourceId = $player['resourceId'];
+                    $player['resourceId'] = $newResourceId;
+                    $player['connected'] = true;
+                    $player['lastReconnect'] = date('Y-m-d H:i:s');
+                    
+                    // Cập nhật playerRoomMap
+                    unset($this->playerRoomMap['player_' . $oldResourceId]);
+                    $this->playerRoomMap[$playerId] = $room->id;
+                    
+                    $this->saveToFile();
+                    
+                    echo "✅ Updated player connection: {$playerId} from {$oldResourceId} to {$newResourceId}\n";
+                    echo "📊 Player details: " . json_encode($player) . "\n";
+                    
+                    return [
+                        'success' => true,
+                        'message' => 'Player connection updated',
+                        'room' => $room->toArray()
+                    ];
+                }
+            }
+        }
+        
+        echo "❌ Player not found: {$playerId}\n";
+        echo "📊 Available players: " . json_encode(array_keys($this->playerRoomMap)) . "\n";
+        return ['success' => false, 'message' => 'Player not found in any room'];
+    }
+
+    public function getRoomByPlayerId($playerId) {
+        if (!isset($this->playerRoomMap[$playerId])) {
+            return null;
+        }
+        
+        $roomId = $this->playerRoomMap[$playerId];
+        return $this->getRoom($roomId);
+    }
+
     public function addPlayer($resourceId, $playerName) {
         if (empty(trim($playerName))) {
             return ['success' => false, 'message' => 'Tên người chơi không được rỗng'];
@@ -125,6 +204,16 @@ class RoomManager {
         
         $playerId = 'player_' . $resourceId;
         
+        if (isset($this->playerRoomMap[$playerId])) {
+            $currentRoomId = $this->playerRoomMap[$playerId];
+            $currentRoom = $this->getRoom($currentRoomId);
+            
+            if ($currentRoom && $currentRoom['status'] === 'waiting') {
+                // Player đã có trong room waiting, cập nhật connection
+                return $this->updatePlayerConnection($playerId, $resourceId);
+            }
+        }
+    
         $room = $this->autoCreateRoomIfNeeded();
         
         $player = [
