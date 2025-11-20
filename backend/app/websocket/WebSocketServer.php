@@ -4,21 +4,49 @@ namespace App\WebSocket;
 use Ratchet\MessageComponentInterface;
 use Ratchet\ConnectionInterface;
 use App\Rooms\RoomManager;
+use App\Services\QuestionManager;
+use App\Services\GameManager;
 
 class WebSocketServer implements MessageComponentInterface {
     protected $clients;
     protected $roomManager;
+    protected $questionManager;
+    protected $gameManager;
     protected $pingTimers;
     protected $lastPingTime;
 
     public function __construct() {
+        // DANH SÁCH FILE CẦN XÓA KHI SERVER KHỞI ĐỘNG
+        $filesToClean = [
+            __DIR__ . '/../../game_data.json',
+            __DIR__ . '/../services/game_states.json',
+            __DIR__ . '/../services/room_questions.json'
+        ];
+
+        echo "🧹 Cleaning old data files...\n";
+        foreach ($filesToClean as $file) {
+            $absolutePath = realpath($file);
+            echo "Checking: $file\n";
+            
+            if (file_exists($file)) {
+                unlink($file);
+                echo "✅ DELETED: $file\n";
+            } else {
+                echo "⚠️ NOT FOUND: $file\n";
+            }
+        }
+
         $this->clients = new \SplObjectStorage;
         $this->roomManager = new RoomManager();
+        $this->questionManager = new QuestionManager(__DIR__ . '/../services/questions.json');
+        $this->gameManager = new GameManager();
         $this->pingTimers = [];
         $this->lastPingTime = [];
         
         echo "🚀 WebSocket Server started on port 8080\n";
         echo "📁 RoomManager initialized\n";
+        echo "❓ QuestionManager initialized\n";
+        echo "🎮 GameManager initialized\n";
         echo "🔄 Auto-reconnection support enabled\n";
         echo "========================================\n";
     }
@@ -26,13 +54,11 @@ class WebSocketServer implements MessageComponentInterface {
     public function onOpen(ConnectionInterface $conn) {
         $this->clients->attach($conn);
         
-        // Khởi tạo ping timer
         $this->lastPingTime[$conn->resourceId] = time();
         
         echo "🔗 New connection: {$conn->resourceId}\n";
         echo "📊 Total connections: " . count($this->clients) . "\n";
         
-        // Gửi welcome message
         $conn->send(json_encode([
             'type' => 'welcome',
             'message' => 'Welcome to QuizBattle!',
@@ -43,7 +69,6 @@ class WebSocketServer implements MessageComponentInterface {
     }
 
     public function onMessage(ConnectionInterface $from, $msg) {
-        // Update last activity time
         $this->lastPingTime[$from->resourceId] = time();
         
         try {
@@ -57,14 +82,12 @@ class WebSocketServer implements MessageComponentInterface {
                 throw new \Exception('Missing message type');
             }
 
-            // Log message (trừ ping/pong để tránh spam)
             if ($data['type'] !== 'ping') {
                 echo "📨 Message from {$from->resourceId}: {$data['type']}\n";
             }
 
             switch ($data['type']) {
                 case 'ping':
-                    // Phản hồi pong ngay lập tức
                     $this->handlePing($from);
                     break;
                     
@@ -80,6 +103,10 @@ class WebSocketServer implements MessageComponentInterface {
                     $this->handleChatMessage($from, $data);
                     break;
                     
+                case 'player_ready':
+                    $this->handlePlayerReady($from, $data);
+                    break;
+
                 case 'submit_answer':
                     $this->handleSubmitAnswer($from, $data);
                     break;
@@ -118,7 +145,6 @@ class WebSocketServer implements MessageComponentInterface {
     }
 
     private function handlePing(ConnectionInterface $from) {
-        // Gửi pong response
         $from->send(json_encode([
             'type' => 'pong',
             'timestamp' => time()
@@ -134,7 +160,6 @@ class WebSocketServer implements MessageComponentInterface {
         $result = $this->roomManager->addPlayer($conn->resourceId, $playerName);
         
         if ($result['success']) {
-            // Gửi thông tin room cho player
             $response = [
                 'type' => 'room_joined',
                 'room_code' => $result['room']['id'],
@@ -147,7 +172,6 @@ class WebSocketServer implements MessageComponentInterface {
             
             $conn->send(json_encode($response));
 
-            // Thông báo cho players khác
             $this->broadcastToRoom($result['room']['id'], [
                 'type' => 'player_joined',
                 'player' => $result['player'],
@@ -174,14 +198,12 @@ class WebSocketServer implements MessageComponentInterface {
             return $this->sendError($conn, 'Missing player_id or room_id for rejoin');
         }
 
-        // Kiểm tra room có tồn tại không
         $room = $this->roomManager->getRoom($roomId);
         if (!$room) {
             echo "❌ Room {$roomId} not found\n";
             return $this->sendError($conn, 'Room not found or expired. Please join a new room.');
         }
 
-        // Tìm player trong room
         $player = null;
         foreach ($room['playerDetails'] as $p) {
             if ($p['id'] === $playerId) {
@@ -197,11 +219,9 @@ class WebSocketServer implements MessageComponentInterface {
 
         echo "🔍 Found player: " . $player['name'] . " in room {$roomId}\n";
 
-        // Cập nhật resourceId của player (reconnection)
         $result = $this->roomManager->updatePlayerConnection($playerId, $conn->resourceId);
         
         if ($result['success']) {
-            // Gửi trạng thái room hiện tại
             $response = [
                 'type' => 'room_joined',
                 'room' => $result['room'],
@@ -213,7 +233,6 @@ class WebSocketServer implements MessageComponentInterface {
             
             $conn->send(json_encode($response));
 
-            // Thông báo cho players khác
             $this->broadcastToRoom($roomId, [
                 'type' => 'player_rejoined',
                 'player' => $player,
@@ -224,7 +243,6 @@ class WebSocketServer implements MessageComponentInterface {
 
             echo "✅ {$playerName} successfully rejoined room {$roomId}\n";
 
-            // Nếu game đang chạy, gửi trạng thái game
             if ($room['status'] === 'playing') {
                 $this->sendGameState($conn, $roomId);
             }
@@ -234,33 +252,156 @@ class WebSocketServer implements MessageComponentInterface {
         }
     }
 
+    private function handlePlayerReady(ConnectionInterface $from, $data) {
+        try {
+            $playerId = 'player_' . $from->resourceId;
+            
+            echo "📨 handlePlayerReady called for player: {$playerId}\n";
+            echo "📊 Data received: " . json_encode($data) . "\n";
+            
+            $room = $this->roomManager->getRoomByResourceId($from->resourceId);
+            
+            if (!$room) {
+                echo "❌ Player {$playerId} not in any room\n";
+                return $this->sendError($from, 'You are not in a room');
+            }
+            
+            echo "📍 Player found in room: {$room['id']}, status: {$room['status']}\n";
+            
+            if ($room['status'] !== 'waiting') {
+                echo "❌ Room status is {$room['status']}, not 'waiting'\n";
+                return $this->sendError($from, 'Cannot change ready status at this time');
+            }
+            
+            $isReady = $data['is_ready'] ?? true;
+            
+            echo "🎮 Player {$playerId} setting ready to: " . ($isReady ? 'READY' : 'NOT READY') . "\n";
+            
+            // Update ready state in RoomManager
+            $result = $this->roomManager->setPlayerReady($playerId, $isReady);
+            
+            if (!$result['success']) {
+                echo "❌ Failed to set player ready: {$result['message']}\n";
+                return $this->sendError($from, $result['message']);
+            }
+            
+            echo "✅ Successfully updated ready state for {$playerId}\n";
+            
+            // Get fresh room data (already an array from toArray())
+            $updatedRoom = $result['room'];
+            
+            // Get ready count
+            $readyStatus = $this->roomManager->getReadyCount($room['id']);
+            echo "📊 Ready status: {$readyStatus['ready']}/{$readyStatus['total']}\n";
+            
+            // Prepare broadcast message
+            $broadcastMessage = [
+                'type' => 'player_ready_update',
+                'player_id' => $playerId,
+                'is_ready' => $isReady,
+                'room' => $updatedRoom,
+                'ready_count' => $readyStatus,
+                'timestamp' => time()
+            ];
+            
+            echo "📡 Broadcasting player_ready_update to room {$room['id']}\n";
+            
+            // Broadcast to ALL players (including sender)
+            $this->broadcastToRoom($room['id'], $broadcastMessage);
+            
+            echo "✅ Broadcast completed\n";
+            
+            // Check if all players are ready
+            if ($this->checkAllPlayersReady($updatedRoom)) {
+                echo "🎉 All players ready in room {$room['id']}!\n";
+                
+                $this->broadcastToRoom($room['id'], [
+                    'type' => 'all_players_ready',
+                    'countdown' => 5,
+                    'message' => 'All players ready! Game can start now.',
+                    'timestamp' => time()
+                ]);
+            } else {
+                echo "⏳ Waiting for more players to ready ({$readyStatus['ready']}/{$readyStatus['total']})\n";
+            }
+            
+        } catch (\Exception $e) {
+            echo "❌❌❌ EXCEPTION in handlePlayerReady: " . $e->getMessage() . "\n";
+            echo "Stack trace:\n" . $e->getTraceAsString() . "\n";
+            
+            try {
+                $this->sendError($from, 'Server error: ' . $e->getMessage());
+            } catch (\Exception $e2) {
+                echo "❌ Failed to send error message: " . $e2->getMessage() . "\n";
+            }
+        }
+    }
+
+    private function checkAllPlayersReady($room) {
+        try {
+            if (empty($room['playerDetails'])) {
+                return false;
+            }
+            
+            // Need at least 2 players
+            if (count($room['playerDetails']) < 2) {
+                return false;
+            }
+            
+            // Check if all players are ready
+            foreach ($room['playerDetails'] as $player) {
+                if (!isset($player['ready']) || $player['ready'] !== true) {
+                    return false;
+                }
+            }
+            
+            return true;
+            
+        } catch (\Exception $e) {
+            echo "❌ Error in checkAllPlayersReady: " . $e->getMessage() . "\n";
+            return false;
+        }
+    }
+
     private function sendGameState(ConnectionInterface $conn, $roomId) {
-        // TODO: Lấy game state thực tế từ game manager
-        // Đây là demo game state
-        $gameState = [
-            'type' => 'game_state',
-            'game' => [
-                'status' => 'playing',
-                'current_question' => [
-                    'id' => 'q1',
-                    'question' => 'What is the capital of France?',
-                    'answers' => [
-                        ['id' => 'a', 'text' => 'London'],
-                        ['id' => 'b', 'text' => 'Paris'],
-                        ['id' => 'c', 'text' => 'Berlin'],
-                        ['id' => 'd', 'text' => 'Madrid']
-                    ],
-                    'time_limit' => 20
-                ],
-                'time_remaining' => 15,
-                'current_question_number' => 1,
-                'total_questions' => 10
-            ],
-            'timestamp' => time()
-        ];
+        $room = $this->roomManager->getRoom($roomId);
         
-        $conn->send(json_encode($gameState));
-        echo "🎮 Sent game state to {$conn->resourceId} in room {$roomId}\n";
+        if (!$room) {
+            echo "❌ Room {$roomId} not found\n";
+            return;
+        }
+        
+        if ($room['status'] === 'playing') {
+            // Lấy câu hỏi hiện tại từ QuestionManager
+            $currentQuestion = $this->questionManager->getCurrentQuestion($roomId);
+            
+            if ($currentQuestion) {
+                $conn->send(json_encode([
+                    'type' => 'new_question',
+                    'question' => $currentQuestion,
+                    'time_limit' => $currentQuestion['time_limit'],
+                    'is_recovery' => true,
+                    'timestamp' => time()
+                ]));
+                
+                echo "🎮 Sent current question to {$conn->resourceId} in room {$roomId}\n";
+            }
+            
+            // Gửi scores hiện tại
+            $this->sendScoresToPlayer($conn, $roomId);
+        }
+    }
+    
+    private function sendScoresToPlayer(ConnectionInterface $conn, $roomId) {
+        $leaderboard = $this->gameManager->getLeaderboard($roomId);
+        
+        if ($leaderboard) {
+            $conn->send(json_encode([
+                'type' => 'scores_update',
+                'scores' => $leaderboard,
+                'timestamp' => time()
+            ]));
+        }
     }
 
     private function handleLeaveRoom(ConnectionInterface $conn, $data) {
@@ -278,7 +419,6 @@ class WebSocketServer implements MessageComponentInterface {
                 'timestamp' => time()
             ]));
 
-            // Thông báo cho players khác
             if (isset($result['room'])) {
                 $this->broadcastToRoom($result['room']['id'], [
                     'type' => 'player_left',
@@ -326,103 +466,235 @@ class WebSocketServer implements MessageComponentInterface {
         
         $result = $this->roomManager->startGame($room['id']);
         if ($result['success']) {
-            // Gửi thông báo game starting với countdown
-            $this->broadcastToRoom($room['id'], [
-                'type' => 'game_starting',
-                'countdown' => 3,
-                'message' => 'Game is starting in 3 seconds...',
-                'timestamp' => time()
-            ]);
+            try {
+                $totalQuestions = 10;
+                $this->questionManager->initializeGameQuestions($room['id'], $totalQuestions, 'random');
+                
+                $this->gameManager->initializeGame($room['id'], $room['playerDetails']);
+                
+                $this->broadcastToRoom($room['id'], [
+                    'type' => 'game_starting',
+                    'countdown' => 3,
+                    'total_questions' => $totalQuestions,
+                    'message' => 'Game is starting in 3 seconds...',
+                    'timestamp' => time()
+                ]);
 
-            // Sau 3 giây gửi câu hỏi đầu tiên
-            // NOTE: Trong production nên dùng event loop hoặc timer thực sự
-            // Ở đây dùng sleep đơn giản cho demo
-            sleep(3);
-            
-            $this->sendFirstQuestion($room['id']);
-
+                // Sử dụng timer thay vì sleep để không block server
+                $roomId = $room['id'];
+                $server = $this;
+                
+                // Tạo timer để gửi câu hỏi đầu tiên sau 3 giây
+                $timer = new \React\EventLoop\Timer\Timer(3, function() use ($server, $roomId) {
+                    $server->sendNextQuestion($roomId);
+                });
+                
+            } catch (\Exception $e) {
+                echo "❌ Error starting game: " . $e->getMessage() . "\n";
+                $this->sendError($from, 'Failed to start game: ' . $e->getMessage());
+            }
         } else {
             $this->sendError($from, $result['message']);
         }
     }
 
-    private function sendFirstQuestion($roomId) {
-        // TODO: Lấy câu hỏi từ database
-        $question = [
-            'id' => 'q1',
-            'question' => 'What is the capital of France?',
-            'answers' => [
-                ['id' => 'a', 'text' => 'London'],
-                ['id' => 'b', 'text' => 'Paris'],
-                ['id' => 'c', 'text' => 'Berlin'],
-                ['id' => 'd', 'text' => 'Madrid']
-            ],
-            'correct_answer' => 'b',
-            'time_limit' => 20
-        ];
-
-        $this->broadcastToRoom($roomId, [
-            'type' => 'new_question',
-            'question' => $question,
-            'time_limit' => $question['time_limit'],
-            'timestamp' => time()
-        ]);
+    private function sendNextQuestion($roomId) {
+        try {
+            $question = $this->questionManager->getNextQuestion($roomId);
+            
+            if (!$question) {
+                echo "🏁 No more questions, ending game for room {$roomId}\n";
+                $this->endGame($roomId);
+                return;
+            }
+            
+            $this->gameManager->setCurrentQuestion($roomId, $question['id']);
+            
+            $clientQuestion = $question;
+            unset($clientQuestion['_correct_answer']);
+            
+            $this->broadcastToRoom($roomId, [
+                'type' => 'new_question',
+                'question' => $clientQuestion,
+                'time_limit' => $question['time_limit'],
+                'question_number' => $question['question_number'],
+                'total_questions' => $question['total_questions'],
+                'timestamp' => time()
+            ]);
+            
+            echo "❓ Sent question {$question['question_number']}/{$question['total_questions']} to room {$roomId}\n";
+            
+            // Tự động chuyển câu hỏi tiếp theo sau khi hết thời gian
+            $this->scheduleNextQuestion($roomId, $question['time_limit']);
+            
+        } catch (\Exception $e) {
+            echo "❌ Error sending question: " . $e->getMessage() . "\n";
+        }
+    }
+    
+    private function scheduleNextQuestion($roomId, $timeLimit) {
+        $server = $this;
         
-        echo "❓ Sent first question to room {$roomId}\n";
+        // Tạo timer để tự động chuyển câu hỏi sau khi hết giờ + thời gian chờ kết quả
+        $totalWaitTime = $timeLimit + 5; // Thời gian làm bài + 5 giây xem kết quả
+        
+        $timer = new \React\EventLoop\Timer\Timer($totalWaitTime, function() use ($server, $roomId) {
+            if ($this->questionManager->hasMoreQuestions($roomId)) {
+                $server->sendNextQuestion($roomId);
+            } else {
+                $server->endGame($roomId);
+            }
+        });
+    }
+    
+    private function endGame($roomId) {
+        try {
+            $leaderboard = $this->gameManager->finishGame($roomId);
+            
+            $this->broadcastToRoom($roomId, [
+                'type' => 'game_finished',
+                'scores' => $leaderboard,
+                'timestamp' => time()
+            ]);
+            
+            $this->questionManager->resetRoom($roomId);
+            $this->gameManager->resetGame($roomId);
+            
+            // Cập nhật trạng thái phòng về waiting
+            $this->roomManager->updateRoomStatus($roomId, \App\Rooms\Room::STATUS_WAITING);
+            
+            echo "🏁 Game ended for room {$roomId}\n";
+            
+        } catch (\Exception $e) {
+            echo "❌ Error ending game: " . $e->getMessage() . "\n";
+        }
     }
 
+    /**
+     * SỬA LỖI QUAN TRỌNG: Xử lý submit answer với logic thực tế
+     */
     private function handleSubmitAnswer(ConnectionInterface $from, $data) {
+        $playerId = 'player_' . $from->resourceId;
         $room = $this->roomManager->getRoomByResourceId($from->resourceId);
+        
         if (!$room) {
+            echo "❌ Player {$playerId} not found in any room\n";
             return $this->sendError($from, 'You are not in a room');
         }
         
+        $roomId = $room['id'];
         $questionId = $data['question_id'] ?? null;
         $answerId = $data['answer_id'] ?? null;
         
-        echo "📝 Player {$from->resourceId} submitted answer: {$answerId}\n";
+        echo "📝 Player {$playerId} (in room {$roomId}) submitted answer: {$answerId} for question {$questionId}\n";
         
-        // TODO: Kiểm tra câu trả lời với database
-        // Demo: 'b' là đáp án đúng
-        $isCorrect = ($answerId === 'b');
+        // Kiểm tra câu hỏi hiện tại
+        $gameState = $this->gameManager->getGameState($roomId);
+        if (!$gameState || $gameState['current_question_id'] !== $questionId) {
+            return $this->sendError($from, 'Invalid question or question not active');
+        }
+        
+        // Kiểm tra đã trả lời chưa
+        if ($this->gameManager->hasAnswered($roomId, $playerId, $questionId)) {
+            return $this->sendError($from, 'Already answered this question');
+        }
+        
+        // Tính thời gian đã trải qua
+        $timeSpent = time() - $gameState['question_start_time'];
+        
+        // Kiểm tra đáp án với QuestionManager
+        $isCorrect = $this->questionManager->verifyAnswer($questionId, $answerId);
+        
+        // Ghi nhận kết quả
+        $result = $this->gameManager->submitAnswer($roomId, $playerId, $questionId, $answerId, $isCorrect, $timeSpent);
         
         // Gửi kết quả cho player
         $from->send(json_encode([
             'type' => 'answer_result',
             'question_id' => $questionId,
             'correct' => $isCorrect,
-            'correct_answer' => 'b',
+            'correct_answer' => $this->questionManager->getCorrectAnswer($questionId),
+            'score' => $result['score'],
+            'total_score' => $result['total_score'],
             'timestamp' => time()
         ]));
-
-        // TODO: Cập nhật scores và broadcast
-        $this->broadcastScores($room['id']);
-
-        echo "✅ Answer processed: " . ($isCorrect ? 'Correct' : 'Wrong') . "\n";
+        
+        // Broadcast cập nhật điểm
+        $this->broadcastScores($roomId);
+        
+        echo "✅ Answer processed: " . ($isCorrect ? 'Correct' : 'Wrong') . " (+{$result['score']} points)\n";
+        
+        // Kiểm tra nếu tất cả player đã trả lời thì chuyển câu hỏi sớm
+        if ($this->gameManager->allPlayersAnswered($roomId, $questionId)) {
+            echo "🎉 All players answered in room {$roomId}. Moving to next question...\n";
+            
+            $this->broadcastToRoom($roomId, [
+                'type' => 'all_answered',
+                'message' => 'All players have answered! Moving to next question...',
+                'timestamp' => time()
+            ]);
+            
+            // Chờ 3 giây rồi chuyển câu hỏi
+            $server = $this;
+            $timer = new \React\EventLoop\Timer\Timer(3, function() use ($server, $roomId) {
+                $server->sendNextQuestion($roomId);
+            });
+        }
     }
 
+    /**
+     * SỬA LỖI: Broadcast scores thực tế từ GameManager
+     */
     private function broadcastScores($roomId) {
-        // TODO: Lấy scores thực tế từ database
-        // Demo scores
-        $scores = [
-            ['player_id' => 'player_123', 'player_name' => 'Player 1', 'score' => 100, 'correct_answers' => 1],
-            ['player_id' => 'player_456', 'player_name' => 'Player 2', 'score' => 50, 'correct_answers' => 0],
-        ];
-
-        $this->broadcastToRoom($roomId, [
-            'type' => 'scores_update',
-            'scores' => $scores,
-            'timestamp' => time()
-        ]);
+        $leaderboard = $this->gameManager->getLeaderboard($roomId);
+        
+        if ($leaderboard) {
+            $this->broadcastToRoom($roomId, [
+                'type' => 'scores_update',
+                'scores' => $leaderboard,
+                'timestamp' => time()
+            ]);
+        }
     }
 
+    /**
+     * SỬA LỖI: Xử lý time up thực tế
+     */
     private function handleTimeUp(ConnectionInterface $from, $data) {
         $room = $this->roomManager->getRoomByResourceId($from->resourceId);
         if (!$room) return;
         
-        echo "⏰ Time up for player {$from->resourceId} in room {$room['id']}\n";
+        $roomId = $room['id'];
+        $questionId = $data['question_id'] ?? null;
         
-        // TODO: Xử lý logic time up
+        echo "⏰ Time up for room {$roomId} (question: {$questionId})\n";
+        
+        // Ghi nhận tất cả player chưa trả lời là sai
+        $gameState = $this->gameManager->getGameState($roomId);
+        if ($gameState) {
+            foreach ($gameState['players'] as $playerId => $player) {
+                if (!$this->gameManager->hasAnswered($roomId, $playerId, $questionId)) {
+                    // Ghi nhận không trả lời (score = 0)
+                    $this->gameManager->submitAnswer($roomId, $playerId, $questionId, null, false, $gameState['question_start_time']);
+                }
+            }
+        }
+        
+        // Broadcast time up
+        $this->broadcastToRoom($roomId, [
+            'type' => 'time_up',
+            'message' => 'Time is up!',
+            'timestamp' => time()
+        ]);
+        
+        // Broadcast scores cập nhật
+        $this->broadcastScores($roomId);
+        
+        // Chuyển câu hỏi tiếp theo sau 5 giây
+        $server = $this;
+        $timer = new \React\EventLoop\Timer\Timer(5, function() use ($server, $roomId) {
+            $server->sendNextQuestion($roomId);
+        });
     }
 
     private function handleChatMessage(ConnectionInterface $from, $data) {
@@ -481,13 +753,11 @@ class WebSocketServer implements MessageComponentInterface {
     public function onClose(ConnectionInterface $conn) {
         echo "🔌 Disconnected: {$conn->resourceId}\n";
         
-        // Đánh dấu player là disconnected nhưng KHÔNG xóa khỏi room
-        // Cho phép họ rejoin trong vòng timeout
+        // Đánh dấu player disconnected nhưng không xóa khỏi room (cho phép rejoin)
         $result = $this->roomManager->markPlayerDisconnected($conn->resourceId);
         if ($result['success']) {
             echo "⏸️ Player {$conn->resourceId} marked as disconnected (can rejoin)\n";
             
-            // Broadcast player disconnected (không phải left)
             if (isset($result['room'])) {
                 $this->broadcastToRoom($result['room']['id'], [
                     'type' => 'player_disconnected',
@@ -510,10 +780,9 @@ class WebSocketServer implements MessageComponentInterface {
         $conn->close();
     }
 
-    // Optional: Cleanup stale connections
     public function checkStaleConnections() {
         $now = time();
-        $timeout = 60; // 60 seconds timeout
+        $timeout = 60;
         
         foreach ($this->lastPingTime as $resourceId => $lastPing) {
             if ($now - $lastPing > $timeout) {

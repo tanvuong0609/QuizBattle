@@ -56,16 +56,24 @@ class Room {
 class RoomManager {
     private $rooms;
     private $playerRoomMap;
+    private $playerIdMap; // Map resourceId -> playerId
     private $nextRoomId;
     private $nextPlayerId;
-    private $dataFile = 'game_data.json';
+    private $dataFile;
     
     public function __construct() {
+        $this->dataFile = __DIR__ . '/../../game_data.json';
         $this->rooms = [];
         $this->playerRoomMap = [];
+        $this->playerIdMap = [];
         $this->nextRoomId = 1;
         $this->nextPlayerId = 1;
         $this->loadFromFile();
+
+        echo "🔍 DEBUG RoomManager:\n";
+        echo "  __DIR__ = " . __DIR__ . "\n";
+        echo "  dataFile = " . $this->dataFile . "\n";
+        echo "  realpath = " . realpath($this->dataFile) . "\n";
     }
     
     public function createRoom() {
@@ -94,6 +102,7 @@ class RoomManager {
         
         foreach ($room->players as $player) {
             unset($this->playerRoomMap[$player['id']]);
+            unset($this->playerIdMap[$player['resourceId']]);
         }
         
         unset($this->rooms[$roomId]);
@@ -119,9 +128,10 @@ class RoomManager {
     }
     
     public function markPlayerDisconnected($resourceId) {
-        $playerId = 'player_' . $resourceId;
+        // Tìm playerId từ resourceId
+        $playerId = $this->getPlayerIdFromResource($resourceId);
         
-        if (!isset($this->playerRoomMap[$playerId])) {
+        if (!$playerId || !isset($this->playerRoomMap[$playerId])) {
             return ['success' => false, 'message' => 'Player not in any room'];
         }
         
@@ -129,6 +139,7 @@ class RoomManager {
         
         if (!isset($this->rooms[$roomId])) {
             unset($this->playerRoomMap[$playerId]);
+            unset($this->playerIdMap[$resourceId]);
             return ['success' => false, 'message' => 'Room not found'];
         }
         
@@ -165,14 +176,14 @@ class RoomManager {
                     $player['connected'] = true;
                     $player['lastReconnect'] = date('Y-m-d H:i:s');
                     
-                    // Cập nhật playerRoomMap
-                    unset($this->playerRoomMap['player_' . $oldResourceId]);
+                    // Cập nhật maps
+                    unset($this->playerIdMap[$oldResourceId]);
+                    $this->playerIdMap[$newResourceId] = $playerId;
                     $this->playerRoomMap[$playerId] = $room->id;
                     
                     $this->saveToFile();
                     
                     echo "✅ Updated player connection: {$playerId} from {$oldResourceId} to {$newResourceId}\n";
-                    echo "📊 Player details: " . json_encode($player) . "\n";
                     
                     return [
                         'success' => true,
@@ -184,7 +195,6 @@ class RoomManager {
         }
         
         echo "❌ Player not found: {$playerId}\n";
-        echo "📊 Available players: " . json_encode(array_keys($this->playerRoomMap)) . "\n";
         return ['success' => false, 'message' => 'Player not found in any room'];
     }
 
@@ -204,6 +214,7 @@ class RoomManager {
         
         $playerId = 'player_' . $resourceId;
         
+        // Kiểm tra nếu player đã có trong một room
         if (isset($this->playerRoomMap[$playerId])) {
             $currentRoomId = $this->playerRoomMap[$playerId];
             $currentRoom = $this->getRoom($currentRoomId);
@@ -221,11 +232,13 @@ class RoomManager {
             'resourceId' => $resourceId,
             'name' => trim($playerName),
             'joinedAt' => date('Y-m-d H:i:s'),
-            'connected' => true
+            'connected' => true,
+            'ready' => false  
         ];
         
         $room->players[] = $player;
         $this->playerRoomMap[$playerId] = $room->id;
+        $this->playerIdMap[$resourceId] = $playerId;
         $this->saveToFile();
         
         return [
@@ -236,59 +249,10 @@ class RoomManager {
         ];
     }
     
-    public function assignPlayer($resourceId, $playerName, $roomId = null) {
-        
-        $playerId = 'player_' . $resourceId;
-
-        if (isset($this->playerRoomMap[$playerId])) {
-            $currentRoomId = $this->playerRoomMap[$playerId];
-            return [
-                'success' => false, 
-                'message' => 'Người chơi đã ở trong phòng ' . $currentRoomId
-            ];
-        }
-        
-        if ($roomId === null) {
-            $room = $this->autoCreateRoomIfNeeded();
-        } else {
-            if (!isset($this->rooms[$roomId])) {
-                return ['success' => false, 'message' => 'Phòng không tồn tại'];
-            }
-            $room = $this->rooms[$roomId];
-        }
-        
-        if ($room->isFull()) {
-            return ['success' => false, 'message' => 'Phòng đã đầy'];
-        }
-        
-        if ($room->status !== Room::STATUS_WAITING) {
-            return ['success' => false, 'message' => 'Phòng đang không nhận người chơi mới'];
-        }
-        
-        $player = [
-            'id' => $playerId,
-            'resourceId' => $resourceId,
-            'name' => $playerName,
-            'joinedAt' => date('Y-m-d H:i:s'),
-            'connected' => true
-        ];
-        
-        $room->players[] = $player;
-        $this->playerRoomMap[$playerId] = $room->id;
-        $this->saveToFile();
-        
-        return [
-            'success' => true,
-            'message' => 'Đã thêm người chơi vào phòng thành công',
-            'room' => $room->toArray(),
-            'player' => $player
-        ];
-    }
-    
     public function removePlayer($resourceId) {
-        $playerId = 'player_' . $resourceId;
+        $playerId = $this->getPlayerIdFromResource($resourceId);
 
-        if (!isset($this->playerRoomMap[$playerId])) {
+        if (!$player['name'] || !isset($this->playerRoomMap[$player['name']])) {
             return ['success' => false, 'message' => 'Người chơi không ở trong phòng nào'];
         }
         
@@ -300,6 +264,7 @@ class RoomManager {
         }));
         
         unset($this->playerRoomMap[$playerId]);
+        unset($this->playerIdMap[$resourceId]);
         
         if ($room->isEmpty() && $room->status !== Room::STATUS_PLAYING) {
             $this->deleteRoom($roomId);
@@ -320,14 +285,32 @@ class RoomManager {
     }
 
     public function getRoomByResourceId($resourceId) {
-        $playerId = 'player_' . $resourceId;
+        $playerId = $this->getPlayerIdFromResource($resourceId);
 
-        if (!isset($this->playerRoomMap[$playerId])) {
+        if (!$playerId || !isset($this->playerRoomMap[$playerId])) {
             return null;
         }
         
         $roomId = $this->playerRoomMap[$playerId];
         return $this->getRoom($roomId);
+    }
+    
+    private function getPlayerIdFromResource($resourceId) {
+        if (isset($this->playerIdMap[$resourceId])) {
+            return $this->playerIdMap[$resourceId];
+        }
+        
+        // Fallback: tìm trong rooms
+        foreach ($this->rooms as $room) {
+            foreach ($room->players as $player) {
+                if ($player['resourceId'] == $resourceId) {
+                    $this->playerIdMap[$resourceId] = $player['id'];
+                    return $player['id'];
+                }
+            }
+        }
+        
+        return null;
     }
     
     public function getRoom($roomId) {
@@ -390,6 +373,104 @@ class RoomManager {
         ];
     }
     
+    public function setPlayerReady($playerId, $ready) {
+        try {
+            echo "🔍 Setting ready for player: {$playerId}, ready: " . ($ready ? 'true' : 'false') . "\n";
+            
+            // ✅ FIX: Iterate qua Room objects đúng cách
+            foreach ($this->rooms as $roomId => $room) {
+                // Kiểm tra playerId có trong room không
+                $playerExists = false;
+                foreach ($room->players as $player) {
+                    if ($player['id'] === $playerId) {
+                        $playerExists = true;
+                        break;
+                    }
+                }
+                
+                if (!$playerExists) {
+                    continue; // Skip room này
+                }
+                
+                echo "📍 Found player in room: {$roomId}\n";
+                
+                // Update player ready status
+                $playerFound = false;
+                foreach ($room->players as $index => &$player) {
+                    if ($player['id'] === $playerId) {
+                        echo "✏️ Updating player {$playerId} ready status from " . 
+                            ($player['ready'] ?? 'null') . " to " . ($ready ? 'true' : 'false') . "\n";
+                        
+                        $player['ready'] = $ready;
+                        $playerFound = true;
+                        
+                        // Save to file
+                        $this->saveToFile();
+                        
+                        echo "💾 Room data saved. Current players ready status:\n";
+                        foreach ($room->players as $p) {
+                            echo "  - {$p['name']} ({$p['id']}): ready=" . ($p['ready'] ?? false ? 'YES' : 'NO') . "\n";
+                        }
+                        
+                        return [
+                            'success' => true,
+                            'room' => $room->toArray(), // ✅ Convert to array
+                            'player' => $player,
+                            'message' => 'Player ready status updated'
+                        ];
+                    }
+                }
+                
+                if (!$playerFound) {
+                    echo "❌ Player {$playerId} found in room but NOT in players array!\n";
+                    return [
+                        'success' => false,
+                        'message' => 'Player not found in room players'
+                    ];
+                }
+            }
+            
+            echo "❌ Player {$playerId} not found in any room\n";
+            return [
+                'success' => false,
+                'message' => 'Player not found in any room'
+            ];
+            
+        } catch (\Exception $e) {
+            echo "❌ Error in setPlayerReady: " . $e->getMessage() . "\n";
+            echo "Stack trace: " . $e->getTraceAsString() . "\n";
+            return [
+                'success' => false,
+                'message' => 'Error: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Get ready count for a room
+     */
+    public function getReadyCount($roomId) {
+        if (!isset($this->rooms[$roomId])) {
+            return ['ready' => 0, 'total' => 0];
+        }
+        
+        $room = $this->rooms[$roomId]; // ✅ Room object
+        
+        $readyCount = 0;
+        $totalPlayers = count($room->players);
+        
+        foreach ($room->players as $player) {
+            if (isset($player['ready']) && $player['ready'] === true) {
+                $readyCount++;
+            }
+        }
+        
+        return [
+            'ready' => $readyCount,
+            'total' => $totalPlayers
+        ];
+    }
+    
     public function getStatistics() {
         $stats = [
             'totalRooms' => count($this->rooms),
@@ -427,6 +508,7 @@ class RoomManager {
     public function reset() {
         $this->rooms = [];
         $this->playerRoomMap = [];
+        $this->playerIdMap = [];
         $this->nextRoomId = 1;
         $this->nextPlayerId = 1;
         $this->saveToFile();
@@ -449,6 +531,7 @@ class RoomManager {
         $data = [
             'rooms' => $roomsData,
             'playerRoomMap' => $this->playerRoomMap,
+            'playerIdMap' => $this->playerIdMap,
             'nextRoomId' => $this->nextRoomId,
             'nextPlayerId' => $this->nextPlayerId
         ];
@@ -471,6 +554,7 @@ class RoomManager {
                 }
                 
                 $this->playerRoomMap = $data['playerRoomMap'] ?? [];
+                $this->playerIdMap = $data['playerIdMap'] ?? [];
                 $this->nextRoomId = $data['nextRoomId'] ?? 1;
                 $this->nextPlayerId = $data['nextPlayerId'] ?? 1;
             }

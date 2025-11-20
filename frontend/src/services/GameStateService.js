@@ -65,7 +65,9 @@ class GameStateService {
 
   // Recovery methods
   shouldRecover() {
-    return !!(this.state.room && this.state.user);
+    const user = this.getUser();
+    const room = this.getRoom();
+    return !!(user && room);
   }
 
   getRecoveryData() {

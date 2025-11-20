@@ -1,0 +1,205 @@
+{
+  "categories": [
+    {
+      "id": "general",
+      "name": "General Knowledge",
+      "questions": [
+        {
+          "id": "q1",
+          "question": "What is the capital of France?",
+          "answers": [
+            {"id": "a", "text": "London"},
+            {"id": "b", "text": "Paris"},
+            {"id": "c", "text": "Berlin"},
+            {"id": "d", "text": "Madrid"}
+          ],
+          "correct_answer": "b",
+          "time_limit": 20,
+          "difficulty": "easy",
+          "points": 100
+        },
+        {
+          "id": "q2",
+          "question": "Which planet is known as the Red Planet?",
+          "answers": [
+            {"id": "a", "text": "Venus"},
+            {"id": "b", "text": "Jupiter"},
+            {"id": "c", "text": "Mars"},
+            {"id": "d", "text": "Saturn"}
+          ],
+          "correct_answer": "c",
+          "time_limit": 20,
+          "difficulty": "easy",
+          "points": 100
+        },
+        {
+          "id": "q3",
+          "question": "What is the largest ocean on Earth?",
+          "answers": [
+            {"id": "a", "text": "Atlantic Ocean"},
+            {"id": "b", "text": "Indian Ocean"},
+            {"id": "c", "text": "Arctic Ocean"},
+            {"id": "d", "text": "Pacific Ocean"}
+          ],
+          "correct_answer": "d",
+          "time_limit": 20,
+          "difficulty": "easy",
+          "points": 100
+        },
+        {
+          "id": "q4",
+          "question": "Who painted the Mona Lisa?",
+          "answers": [
+            {"id": "a", "text": "Vincent van Gogh"},
+            {"id": "b", "text": "Leonardo da Vinci"},
+            {"id": "c", "text": "Pablo Picasso"},
+            {"id": "d", "text": "Michelangelo"}
+          ],
+          "correct_answer": "b",
+          "time_limit": 20,
+          "difficulty": "medium",
+          "points": 100
+        },
+        {
+          "id": "q5",
+          "question": "What is the smallest country in the world?",
+          "answers": [
+            {"id": "a", "text": "Monaco"},
+            {"id": "b", "text": "Vatican City"},
+            {"id": "c", "text": "San Marino"},
+            {"id": "d", "text": "Liechtenstein"}
+          ],
+          "correct_answer": "b",
+          "time_limit": 20,
+          "difficulty": "medium",
+          "points": 100
+        },
+        {
+          "id": "q6",
+          "question": "Which element has the chemical symbol 'Au'?",
+          "answers": [
+            {"id": "a", "text": "Silver"},
+            {"id": "b", "text": "Gold"},
+            {"id": "c", "text": "Copper"},
+            {"id": "d", "text": "Iron"}
+          ],
+          "correct_answer": "b",
+          "time_limit": 20,
+          "difficulty": "medium",
+          "points": 100
+        },
+        {
+          "id": "q7",
+          "question": "What year did World War II end?",
+          "answers": [
+            {"id": "a", "text": "1943"},
+            {"id": "b", "text": "1944"},
+            {"id": "c", "text": "1945"},
+            {"id": "d", "text": "1946"}
+          ],
+          "correct_answer": "c",
+          "time_limit": 20,
+          "difficulty": "medium",
+          "points": 100
+        },
+        {
+          "id": "q8",
+          "question": "Which programming language is known as the 'language of the web'?",
+          "answers": [
+            {"id": "a", "text": "Python"},
+            {"id": "b", "text": "Java"},
+            {"id": "c", "text": "JavaScript"},
+            {"id": "d", "text": "C++"}
+          ],
+          "correct_answer": "c",
+          "time_limit": 20,
+          "difficulty": "easy",
+          "points": 100
+        },
+        {
+          "id": "q9",
+          "question": "What is the speed of light?",
+          "answers": [
+            {"id": "a", "text": "299,792 km/s"},
+            {"id": "b", "text": "150,000 km/s"},
+            {"id": "c", "text": "500,000 km/s"},
+            {"id": "d", "text": "1,000,000 km/s"}
+          ],
+          "correct_answer": "a",
+          "time_limit": 20,
+          "difficulty": "hard",
+          "points": 100
+        },
+        {
+          "id": "q10",
+          "question": "Which country has the most UNESCO World Heritage Sites?",
+          "answers": [
+            {"id": "a", "text": "China"},
+            {"id": "b", "text": "Italy"},
+            {"id": "c", "text": "Spain"},
+            {"id": "d", "text": "France"}
+          ],
+          "correct_answer": "b",
+          "time_limit": 20,
+          "difficulty": "hard",
+          "points": 100
+        }
+      ]
+    },
+    {
+      "id": "science",
+      "name": "Science",
+      "questions": [
+        {
+          "id": "q11",
+          "question": "What is the powerhouse of the cell?",
+          "answers": [
+            {"id": "a", "text": "Nucleus"},
+            {"id": "b", "text": "Ribosome"},
+            {"id": "c", "text": "Mitochondria"},
+            {"id": "d", "text": "Chloroplast"}
+          ],
+          "correct_answer": "c",
+          "time_limit": 20,
+          "difficulty": "easy",
+          "points": 100
+        },
+        {
+          "id": "q12",
+          "question": "What is the chemical formula for water?",
+          "answers": [
+            {"id": "a", "text": "H2O"},
+            {"id": "b", "text": "CO2"},
+            {"id": "c", "text": "O2"},
+            {"id": "d", "text": "H2O2"}
+          ],
+          "correct_answer": "a",
+          "time_limit": 20,
+          "difficulty": "easy",
+          "points": 100
+        },
+        {
+          "id": "q13",
+          "question": "How many bones are in the adult human body?",
+          "answers": [
+            {"id": "a", "text": "186"},
+            {"id": "b", "text": "206"},
+            {"id": "c", "text": "226"},
+            {"id": "d", "text": "246"}
+          ],
+          "correct_answer": "b",
+          "time_limit": 20,
+          "difficulty": "medium",
+          "points": 100
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "version": "1.0",
+    "total_questions": 13,
+    "last_updated": "2025-01-19",
+    "default_time_limit": 20,
+    "default_points": 100
+  }
+}

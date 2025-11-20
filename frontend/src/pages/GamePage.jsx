@@ -67,10 +67,16 @@ function GamePage() {
 
   const setupWebSocketHandlers = () => {
     webSocketService.onMessage('new_question', (data) => {
-      console.log('❓ New question received')
+      console.log('❓ New question received', data.is_recovery ? '(Recovery)' : '')
+      
       setCurrentQuestion(data.question)
       setTimeRemaining(data.question.time_limit)
-      setQuestionNumber(prev => prev + 1)
+      
+      // Chỉ tăng questionNumber nếu không phải recovery
+      if (!data.is_recovery) {
+        setQuestionNumber(prev => prev + 1)
+      }
+      
       setGamePhase('playing')
       setSelectedAnswer(null)
       setCorrectAnswerId(null)

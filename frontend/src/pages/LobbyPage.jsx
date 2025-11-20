@@ -14,6 +14,8 @@ function LobbyPage() {
   const [errorMessage, setErrorMessage] = useState('')
   const [roomCode] = useState(room?.id || '')
   const [countdownInterval, setCountdownInterval] = useState(null)
+  const [isReady, setIsReady] = useState(false)
+  const [readyPlayers, setReadyPlayers] = useState([])
 
   useEffect(() => {
     // Kiểm tra user và room
@@ -55,11 +57,14 @@ function LobbyPage() {
       webSocketService.offMessage('player_left')
       webSocketService.offMessage('player_rejoined')
       webSocketService.offMessage('game_starting')
-      webSocketService.offMessage('new_question')
+      // webSocketService.offMessage('new_question')
       webSocketService.offMessage('room_updated')
       webSocketService.offMessage('error')
       webSocketService.offMessage('connection_lost')
       webSocketService.offMessage('connection_established')
+      webSocketService.offMessage('player_ready')
+      webSocketService.offMessage('all_players_ready')
+      webSocketService.offMessage('game_countdown')
       
       // Clear countdown interval
       if (countdownInterval) {
@@ -108,6 +113,53 @@ function LobbyPage() {
       }
     })
 
+    // Handler khi player ready
+    webSocketService.onMessage('player_ready_update', (data) => {
+      console.log('✅ Player ready update:', data)
+      
+      // Update room data
+      if (data.room?.playerDetails) {
+        setPlayers(data.room.playerDetails)
+        gameStateService.setRoom(data.room)
+      }
+      
+      // Update ready count display
+      if (data.ready_count) {
+        console.log(`📊 Ready: ${data.ready_count.ready}/${data.ready_count.total}`)
+      }
+      
+      // Update ready players list
+      if (data.is_ready && data.player_id) {
+        setReadyPlayers(prev => {
+          if (!prev.includes(data.player_id)) {
+            return [...prev, data.player_id]
+          }
+          return prev
+        })
+      } else if (!data.is_ready && data.player_id) {
+        setReadyPlayers(prev => prev.filter(id => id !== data.player_id))
+      }
+    })
+
+    // Handler khi tất cả player ready
+    webSocketService.onMessage('all_players_ready', (data) => {
+      console.log('🎮 All players ready! Starting countdown...')
+      setCountdown(data.countdown || 5)
+      
+      // Start countdown
+      let count = data.countdown || 5
+      const interval = setInterval(() => {
+        count--
+        setCountdown(count)
+        
+        if (count <= 0) {
+          clearInterval(interval)
+          setCountdown(null)
+        }
+      }, 1000)
+      
+      setCountdownInterval(interval)
+    })
     // Handler khi game bắt đầu
     webSocketService.onMessage('game_starting', (data) => {
       console.log('🎮 Game starting in', data.countdown, 'seconds')
@@ -130,6 +182,7 @@ function LobbyPage() {
 
     // Handler khi nhận câu hỏi đầu tiên
     webSocketService.onMessage('new_question', (data) => {
+
       console.log('❓ First question received')
       gameStateService.setCurrentQuestion(data.question)
       
@@ -176,18 +229,31 @@ function LobbyPage() {
     })
   }
 
-  const handleStartGame = () => {
+  const handleReadyToggle = () => {
     if (!webSocketService.isConnected()) {
       setErrorMessage('Không có kết nối đến server')
       return
     }
 
-    console.log('🎮 Starting game...')
-    const startMessage = {
-      type: 'start_game',
-      room_id: room.id
+    const newReadyState = !isReady
+    setIsReady(newReadyState)
+
+    console.log('✅ Player ready state:', newReadyState)
+    
+    const readyMessage = {
+      type: 'player_ready',
+      room_id: room.id,
+      player_id: user.id,
+      is_ready: newReadyState
     }
-    webSocketService.send(startMessage)
+    webSocketService.send(readyMessage)
+
+    // Cập nhật local state
+    if (newReadyState) {
+      setReadyPlayers(prev => [...prev, user.id])
+    } else {
+      setReadyPlayers(prev => prev.filter(id => id !== user.id))
+    }
   }
 
   const handleLeaveRoom = () => {
@@ -234,6 +300,8 @@ function LobbyPage() {
 
   const minPlayers = 2
   const isEnoughPlayers = players.length >= minPlayers
+  const allPlayersReady = readyPlayers.length === players.length && players.length >= minPlayers
+  const isPlayerReady = readyPlayers.includes(user.id)
 
   return (
     <div className="min-h-screen relative overflow-hidden" style={{
@@ -294,6 +362,36 @@ function LobbyPage() {
             </div>
           )}
 
+          {/* Ready Status Bar */}
+          {isEnoughPlayers && (
+            <div className="mb-4">
+              <div className="bg-white/90 backdrop-blur-lg rounded-2xl p-4 shadow-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className={`font-bold ${allPlayersReady ? 'text-green-500' : 'text-yellow-500'}`}>
+                      {allPlayersReady ? '🎉 All players ready!' : `⏳ ${readyPlayers.length}/${players.length} players ready`}
+                    </span>
+                  </div>
+                  {allPlayersReady && (
+                    <div className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-bold animate-pulse">
+                      Starting soon...
+                    </div>
+                  )}
+                </div>
+                
+                {/* Progress Bar */}
+                <div className="mt-3">
+                  <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                    <div
+                      className="bg-gradient-to-r from-green-400 to-green-600 h-3 rounded-full transition-all duration-500"
+                      style={{ width: `${(readyPlayers.length / players.length) * 100}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Main Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
@@ -313,46 +411,66 @@ function LobbyPage() {
 
                 {/* Players Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-96 overflow-y-auto">
-                  {players.map((player, index) => (
-                    <div
-                      key={player.id || index}
-                      className="flex items-center gap-3 p-4 rounded-xl bg-gradient-to-br from-purple-50 to-pink-50 border-2 border-purple-100 hover:border-purple-300 transition-all duration-300 hover:-translate-y-1 hover:shadow-md"
-                      style={{
-                        animation: 'slideIn 0.3s ease-out',
-                        animationDelay: `${index * 0.1}s`,
-                        animationFillMode: 'backwards'
-                      }}
-                    >
-                      {/* Avatar */}
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-xl flex-shrink-0">
-                        {player.name[0].toUpperCase()}
-                      </div>
-                      
-                      {/* Info */}
-                      <div className="flex-1 min-w-0">
-                        <div className="font-bold text-gray-800 truncate">
-                          {player.name}
-                          {player.id === user.id && (
-                            <span className="ml-2 text-xs bg-purple-500 text-white px-2 py-0.5 rounded-full">
-                              You
-                            </span>
+                  {players.map((player, index) => {
+                    const isReady = readyPlayers.includes(player.id)
+                    const isCurrentUser = player.id === user.id
+                    
+                    return (
+                      <div
+                        key={player.id || index}
+                        className={`flex items-center gap-3 p-4 rounded-xl border-2 transition-all duration-300 hover:-translate-y-1 hover:shadow-md ${
+                          isReady 
+                            ? 'bg-gradient-to-br from-green-50 to-emerald-50 border-green-200' 
+                            : 'bg-gradient-to-br from-purple-50 to-pink-50 border-purple-100 hover:border-purple-300'
+                        }`}
+                        style={{
+                          animation: 'slideIn 0.3s ease-out',
+                          animationDelay: `${index * 0.1}s`,
+                          animationFillMode: 'backwards'
+                        }}
+                      >
+                        {/* Avatar */}
+                        <div className="relative">
+                          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-xl flex-shrink-0 ${
+                            isReady 
+                              ? 'bg-gradient-to-br from-green-500 to-emerald-500' 
+                              : 'bg-gradient-to-br from-purple-500 to-pink-500'
+                          }`}>
+                            {player.name[0].toUpperCase()}
+                          </div>
+                          {isReady && (
+                            <div className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">
+                              <span className="text-white text-xs">✓</span>
+                            </div>
                           )}
                         </div>
-                        <div className="text-xs text-gray-500">
-                          {player.joinedAt && `Joined ${Math.floor((Date.now() - new Date(player.joinedAt).getTime()) / 1000)}s ago`}
+                        
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-gray-800 truncate">
+                            {player.name}
+                            {isCurrentUser && (
+                              <span className="ml-2 text-xs bg-purple-500 text-white px-2 py-0.5 rounded-full">
+                                You
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {isReady ? '✅ Ready' : '⏳ Not ready'}
+                          </div>
+                        </div>
+                        
+                        {/* Connection Status */}
+                        <div className="flex-shrink-0">
+                          {player.connected ? (
+                            <span className="text-green-500 text-2xl" title="Connected">✓</span>
+                          ) : (
+                            <span className="text-gray-400 text-2xl animate-pulse" title="Disconnected">⏳</span>
+                          )}
                         </div>
                       </div>
-                      
-                      {/* Connection Status */}
-                      <div className="flex-shrink-0">
-                        {player.connected ? (
-                          <span className="text-green-500 text-2xl" title="Connected">✓</span>
-                        ) : (
-                          <span className="text-gray-400 text-2xl animate-pulse" title="Disconnected">⏳</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                   
                   {/* Empty Slots */}
                   {players.length < 4 && (
@@ -397,6 +515,40 @@ function LobbyPage() {
                 </div>
               </div>
 
+              {/* Ready Button */}
+              <div className="bg-white/95 backdrop-blur-xl rounded-3xl p-6 shadow-2xl">
+                <h3 className="text-xl font-black text-gray-800 mb-4">🎯 Ready Status</h3>
+                
+                <div className="space-y-4">
+                  <div className="text-center">
+                    <div className={`text-4xl mb-2 ${isPlayerReady ? 'animate-bounce' : ''}`}>
+                      {isPlayerReady ? '✅' : '⏳'}
+                    </div>
+                    <p className="font-bold text-gray-700">
+                      {isPlayerReady ? 'You are ready!' : 'Are you ready?'}
+                    </p>
+                  </div>
+                  
+                  <button
+                    onClick={handleReadyToggle}
+                    disabled={!isEnoughPlayers || connectionStatus !== 'connected'}
+                    className={`w-full py-4 px-6 font-bold rounded-xl transition-all duration-300 hover:shadow-lg hover:scale-105 active:scale-95 ${
+                      isPlayerReady
+                        ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700'
+                        : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600'
+                    } disabled:bg-gray-400 disabled:cursor-not-allowed disabled:scale-100`}
+                  >
+                    {isPlayerReady ? '🎮 I\'m Ready!' : '⚡ Ready Up!'}
+                  </button>
+                  
+                  {!isEnoughPlayers && (
+                    <p className="text-sm text-yellow-600 text-center">
+                      Need {minPlayers - players.length} more player(s) to start
+                    </p>
+                  )}
+                </div>
+              </div>
+
               {/* Rules */}
               <div className="bg-white/95 backdrop-blur-xl rounded-3xl p-6 shadow-2xl">
                 <h3 className="text-xl font-black text-gray-800 mb-4">📋 Rules</h3>
@@ -423,14 +575,6 @@ function LobbyPage() {
               {/* Actions */}
               <div className="space-y-3">
                 <button
-                  onClick={handleStartGame}
-                  disabled={!isEnoughPlayers || connectionStatus !== 'connected'}
-                  className="w-full py-4 px-6 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-bold rounded-xl transition-all duration-300 hover:shadow-lg hover:scale-105 active:scale-95 disabled:cursor-not-allowed disabled:scale-100"
-                >
-                  🚀 Start Game
-                </button>
-                
-                <button
                   onClick={handleLeaveRoom}
                   className="w-full py-4 px-6 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl transition-all duration-300 hover:shadow-lg hover:scale-105 active:scale-95"
                 >
@@ -443,9 +587,11 @@ function LobbyPage() {
           {/* Footer Info */}
           <div className="mt-6 text-center">
             <p className="text-white/70 text-sm">
-              {isEnoughPlayers 
-                ? '✅ Game will start when all players are ready' 
-                : `⏳ Waiting for ${minPlayers - players.length} more player(s)`
+              {allPlayersReady 
+                ? '🎉 All players ready! Game starting soon...' 
+                : !isEnoughPlayers 
+                ? `⏳ Waiting for ${minPlayers - players.length} more player(s)` 
+                : `⏳ Waiting for ${players.length - readyPlayers.length} player(s) to ready up`
               }
             </p>
           </div>
